@@ -1,0 +1,8 @@
+[submodule "src/unitree_ros2"]
+	path = src/unitree_ros2
+	url = https://github.com/unitreerobotics/unitree_ros2.git
+	ignore = dirty
+[submodule "src/unitree_mujoco"]
+	path = src/unitree_mujoco
+	url = https://github.com/unitreerobotics/unitree_mujoco.git
+	ignore = dirty

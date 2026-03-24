@@ -1,0 +1,10 @@
+build
+install
+log
+reports
+src/unitree_ros2/.git
+src/unitree_mujoco/.git
+third_party/unitree_sdk2/.git
+third_party/unitree_sdk2_2.0.1.tar.gz
+third_party/unitree_sdk2_2.0.2_backup
+third_party/unitree_sdk2_main_backup

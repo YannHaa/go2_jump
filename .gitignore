@@ -1,0 +1,13 @@
+/build/
+/install/
+/log/
+/reports/
+/logs_mujoco_full_bridge.txt
+/tools/build/
+
+__pycache__/
+*.pyc
+*.pyo
+
+/third_party/*
+!/third_party/README.md

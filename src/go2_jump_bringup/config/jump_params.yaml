@@ -1,0 +1,86 @@
+go2_jump_planner:
+  ros__parameters:
+    target_distance_m: 0.25
+    takeoff_angle_deg: 45.0
+    takeoff_speed_scale: 1.06
+    use_takeoff_speed_scale_curve: true
+    takeoff_speed_scale_distance_points_m: [0.20, 0.25, 0.30]
+    takeoff_speed_scale_values: [1.09, 1.06, 1.06]
+
+go2_jump_controller:
+  ros__parameters:
+    control_dt_s: 0.002
+    auto_start: true
+    start_delay_s: 1.0
+    report_path: /workspace/reports/jump_metrics/latest_report.txt
+    takeoff_height_threshold_m: 0.03
+    landing_height_threshold_m: 0.02
+    landing_speed_threshold_mps: 0.35
+    startup_pose_tolerance_rad: 0.25
+    startup_body_speed_tolerance_mps: 0.10
+    startup_tilt_tolerance_deg: 20.0
+    target_distance_m: 0.25
+    takeoff_angle_deg: 45.0
+    takeoff_speed_scale: 1.06
+    use_takeoff_speed_scale_curve: true
+    takeoff_speed_scale_distance_points_m: [0.20, 0.25, 0.30]
+    takeoff_speed_scale_values: [1.09, 1.06, 1.06]
+    hold_kp: 65.0
+    flight_kp: 30.0
+    kd: 4.0
+    push_front_tau_scale: 0.92
+    push_rear_tau_scale: 1.08
+    landing_front_tau_scale: 0.90
+    landing_rear_tau_scale: 1.10
+    push_pitch_target_deg: -5.0
+    push_pitch_compactness_gain: 0.35
+    push_pitch_rate_gain: 0.03
+    push_pitch_correction_limit_rad: 0.08
+    flight_pitch_target_deg: -2.0
+    flight_pitch_compactness_gain: 0.55
+    flight_pitch_rate_gain: 0.05
+    flight_pitch_correction_limit_rad: 0.18
+    landing_pitch_target_deg: -8.0
+    landing_pitch_compactness_gain: 0.40
+    landing_pitch_rate_gain: 0.04
+    landing_pitch_correction_limit_rad: 0.12
+
+    stand_hip_rad: 0.00571868
+    stand_thigh_rad: 0.608813
+    stand_calf_rad: -1.21763
+    stand_front_compact_delta_rad: 0.06
+    stand_rear_compact_delta_rad: -0.18
+
+    crouch_hip_rad: 0.0473455
+    crouch_thigh_rad: 1.22187
+    crouch_calf_rad: -2.44375
+    crouch_front_compact_delta_rad: 0.14
+    crouch_rear_compact_delta_rad: -0.06
+
+    push_hip_rad: 0.0
+    push_thigh_rad: 0.82
+    push_calf_rad: -1.08
+    push_front_compact_delta_rad: -0.18
+    push_rear_compact_delta_rad: 0.04
+
+    flight_hip_rad: 0.0
+    flight_thigh_rad: 0.92
+    flight_calf_rad: -1.55
+    flight_front_compact_delta_rad: 0.20
+    flight_rear_compact_delta_rad: -0.10
+
+    landing_hip_rad: 0.025
+    landing_thigh_rad: 1.05
+    landing_calf_rad: -2.05
+    landing_front_compact_delta_rad: -0.08
+    landing_rear_compact_delta_rad: 0.14
+
+    crouch_duration_s: 0.32
+    push_duration_s: 0.12
+    landing_duration_s: 0.20
+    recovery_duration_s: 0.32
+
+    push_thigh_tau_ff: 4.5
+    push_calf_tau_ff: 7.5
+    landing_thigh_tau_ff: 1.6
+    landing_calf_tau_ff: 2.8

@@ -1,0 +1,62 @@
+FROM althack/ros2:humble-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    curl \
+    ca-certificates \
+    python3-pip \
+    python3-colcon-common-extensions \
+    python3-vcstool \
+    python3-rosdep \
+    libyaml-cpp-dev \
+    libspdlog-dev \
+    libboost-all-dev \
+    libglfw3-dev \
+    libxinerama-dev \
+    libxcursor-dev \
+    libxi-dev \
+    libxrandr-dev \
+    libgl1-mesa-dev \
+    libglu1-mesa-dev \
+    libegl1-mesa-dev \
+    libgles2-mesa-dev \
+    libosmesa6-dev \
+    mesa-utils \
+    patchelf \
+    xvfb \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir \
+    mujoco==3.3.6 \
+    pygame
+
+WORKDIR /opt/src
+COPY docker/bootstrap_third_party.sh /usr/local/bin/bootstrap_third_party.sh
+COPY third_party /opt/third_party-cache
+RUN chmod +x /usr/local/bin/bootstrap_third_party.sh \
+    && /usr/local/bin/bootstrap_third_party.sh
+RUN cd unitree_sdk2 \
+    && mkdir -p build \
+    && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics \
+    && make -j"$(nproc)" \
+    && make install \
+    && rm -rf /opt/src/unitree_sdk2
+
+RUN mkdir -p /root/.mujoco \
+    && cd /root/.mujoco \
+    && tar -xzf /opt/third_party-cache/mujoco-3.3.6-linux-x86_64.tar.gz \
+    && rm -rf /opt/third_party-cache
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV CMAKE_PREFIX_PATH=/opt/unitree_robotics/lib/cmake:${CMAKE_PREFIX_PATH:-}
+ENV LD_LIBRARY_PATH=/opt/unitree_robotics/lib:/root/.mujoco/mujoco-3.3.6/lib:${LD_LIBRARY_PATH:-}
+
+WORKDIR /workspace

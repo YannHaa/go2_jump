@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>go2_jump_controller</name>
+  <version>0.1.0</version>
+  <description>Minimal low-level forward-jump controller for Unitree Go2.</description>
+  <maintainer email="hayan@example.com">hayan</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>go2_jump_planner</depend>
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>unitree_go</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,768 @@
+diff --git a/simulate/src/main.cc b/simulate/src/main.cc
+index 3368d91..8d4958b 100755
+--- a/simulate/src/main.cc
++++ b/simulate/src/main.cc
+@@ -563,6 +563,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
+ 
+   PhysicsLoop(*sim);
+ 
++  if (std::getenv("UNITREE_MUJOCO_HEADLESS") != nullptr) {
++    std::cerr << "Physics loop exited in headless mode, skipping cleanup to keep the bridge alive." << std::endl;
++    while (true) {
++      sleep(1);
++    }
++  }
++
+   // delete everything we allocated
+   free(ctrlnoise);
+   mj_deleteData(d);
+@@ -573,6 +580,14 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
+ 
+ void *UnitreeSdk2BridgeThread(void *arg)
+ {
++  if (std::getenv("UNITREE_MUJOCO_DISABLE_BRIDGE") != nullptr) {
++    std::cout << "UNITREE_MUJOCO_DISABLE_BRIDGE is set, skipping Unitree DDS bridge startup." << std::endl;
++    while (true) {
++      sleep(1);
++    }
++  }
++
++  std::cout << "Bridge stage: wait_for_mujoco_data" << std::endl;
+   // Wait for mujoco data
+   while (true)
+   {
+@@ -584,22 +599,41 @@ void *UnitreeSdk2BridgeThread(void *arg)
+     usleep(500000);
+   }
+ 
++  std::cout << "Bridge stage: init_channel_factory" << std::endl;
+   unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
+ 
++  if (std::getenv("UNITREE_MUJOCO_STOP_AFTER_CHANNEL_INIT") != nullptr) {
++    std::cout << "UNITREE_MUJOCO_STOP_AFTER_CHANNEL_INIT is set, stopping after ChannelFactory init." << std::endl;
++    while (true) {
++      sleep(1);
++    }
++  }
+ 
++  std::cout << "Bridge stage: resolve_body_id" << std::endl;
+   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
+   if (body_id < 0) {
+     body_id = mj_name2id(m, mjOBJ_BODY, "base_link");
+   }
+   param::config.band_attached_link = 6 * body_id;
+   
++  std::cout << "Bridge stage: construct_bridge" << std::endl;
+   std::unique_ptr<UnitreeSDK2BridgeBase> interface = nullptr;
+   if (m->nu > NUM_MOTOR_IDL_GO) {
+     interface = std::make_unique<G1Bridge>(m, d);
+   } else {
+     interface = std::make_unique<Go2Bridge>(m, d);
+   }
++
++  if (std::getenv("UNITREE_MUJOCO_STOP_AFTER_BRIDGE_CONSTRUCT") != nullptr) {
++    std::cout << "UNITREE_MUJOCO_STOP_AFTER_BRIDGE_CONSTRUCT is set, stopping after bridge construction." << std::endl;
++    while (true) {
++      sleep(1);
++    }
++  }
++
++  std::cout << "Bridge stage: start_bridge_thread" << std::endl;
+   interface->start();
++  std::cout << "Bridge stage: bridge_thread_started" << std::endl;
+   
+   while (true)
+   {
+@@ -687,10 +721,25 @@ int main(int argc, char **argv)
+ 
+   // start physics thread
+   std::thread physicsthreadhandle(&PhysicsThread, sim.get(), param::config.robot_scene.c_str());
++  auto* glfw_adapter = static_cast<mj::GlfwAdapter*>(sim->platform_ui.get());
++  const bool headless_requested = std::getenv("UNITREE_MUJOCO_HEADLESS") != nullptr;
++  const bool have_window = glfw_adapter != nullptr && glfw_adapter->window_ != nullptr;
++  if (headless_requested || !have_window) {
++    if (!have_window) {
++      std::cerr << "GLFW window is unavailable, switching to headless simulation loop." << std::endl;
++    } else {
++      std::cout << "UNITREE_MUJOCO_HEADLESS is set, skipping GLFW render loop." << std::endl;
++    }
++    sim->run = true;
++    while (true) {
++      std::this_thread::sleep_for(std::chrono::seconds(1));
++    }
++  }
+   // start simulation UI loop (blocking call)
+-  glfwSetKeyCallback(static_cast<mj::GlfwAdapter*>(sim->platform_ui.get())->window_,user_key_cb);
++  glfwSetKeyCallback(glfw_adapter->window_,user_key_cb);
+   sim->RenderLoop();
+   physicsthreadhandle.join();
++  unitree_thread.join();
+ 
+   pthread_exit(NULL);
+   return 0;
+diff --git a/simulate/src/physics_joystick.h b/simulate/src/physics_joystick.h
+index 39a900b..3344a1f 100644
+--- a/simulate/src/physics_joystick.h
++++ b/simulate/src/physics_joystick.h
+@@ -1,7 +1,7 @@
+ #pragma once
+ 
+ #include <iostream>
+-#include <unitree/dds_wrapper/common/unitree_joystick.hpp>
++#include "unitree_joystick.hpp"
+ #include "joystick/joystick.h"
+ #include <memory>
+ 
+@@ -87,4 +87,4 @@ public:
+ private:
+ 	std::unique_ptr<Joystick> js_;
+ 	int max_value_;
+-};
+\ No newline at end of file
++};
+diff --git a/simulate/src/unitree_sdk2_bridge.h b/simulate/src/unitree_sdk2_bridge.h
+index 7c13289..f582d96 100644
+--- a/simulate/src/unitree_sdk2_bridge.h
++++ b/simulate/src/unitree_sdk2_bridge.h
+@@ -1,21 +1,201 @@
+ #pragma once
+ 
++#include <atomic>
++#include <cmath>
++#include <cstring>
++#include <iostream>
++#include <initializer_list>
++#include <memory>
++#include <mutex>
++#include <vector>
++
+ #include <mujoco/mujoco.h>
+ 
++#include <unitree/common/thread/recurrent_thread.hpp>
+ #include <unitree/robot/channel/channel_publisher.hpp>
+ #include <unitree/robot/channel/channel_subscriber.hpp>
+-#include <unitree/dds_wrapper/robots/go2/go2.h>
+-#include <unitree/dds_wrapper/robots/g1/g1.h>
++#include <unitree/idl/go2/LowCmd_.hpp>
++#include <unitree/idl/go2/LowState_.hpp>
++#include <unitree/idl/go2/SportModeState_.hpp>
++#include <unitree/idl/go2/WirelessController_.hpp>
+ #include <unitree/idl/hg/BmsState_.hpp>
+ #include <unitree/idl/hg/IMUState_.hpp>
+-
+-#include <iostream>
++#include <unitree/idl/hg/LowCmd_.hpp>
++#include <unitree/idl/hg/LowState_.hpp>
+ 
+ #include "param.h"
+ #include "physics_joystick.h"
+ 
+ #define MOTOR_SENSOR_NUM 3
+ 
++inline uint32_t crc32_core(uint32_t* ptr, uint32_t len)
++{
++    uint32_t xbit = 0;
++    uint32_t data = 0;
++    uint32_t crc32 = 0xFFFFFFFF;
++    const uint32_t polynomial = 0x04c11db7;
++
++    for (uint32_t i = 0; i < len; i++)
++    {
++        xbit = 1U << 31;
++        data = ptr[i];
++        for (uint32_t bits = 0; bits < 32; bits++)
++        {
++            if (crc32 & 0x80000000U)
++            {
++                crc32 <<= 1;
++                crc32 ^= polynomial;
++            }
++            else
++            {
++                crc32 <<= 1;
++            }
++
++            if (data & xbit)
++            {
++                crc32 ^= polynomial;
++            }
++            xbit >>= 1;
++        }
++    }
++
++    return crc32;
++}
++
++template <typename MsgType>
++class ChannelSubscriptionBuffer
++{
++public:
++    explicit ChannelSubscriptionBuffer(const std::string& topic)
++        : ChannelSubscriptionBuffer(std::vector<std::string>{topic})
++    {
++    }
++
++    explicit ChannelSubscriptionBuffer(const std::vector<std::string>& topics)
++    {
++        for (const auto& topic : topics) {
++            auto subscriber = std::make_shared<unitree::robot::ChannelSubscriber<MsgType>>(topic);
++            subscriber->InitChannel(
++                [this](const void* message) {
++                    std::lock_guard<std::mutex> lock(mutex_);
++                    msg_ = *static_cast<const MsgType*>(message);
++                },
++                1);
++            subscribers_.push_back(subscriber);
++        }
++    }
++
++    MsgType msg_{};
++    std::mutex mutex_;
++
++private:
++    std::vector<unitree::robot::ChannelSubscriberPtr<MsgType>> subscribers_;
++};
++
++template <typename MsgType>
++class ChannelPublisherBuffer
++{
++public:
++    explicit ChannelPublisherBuffer(const std::string& topic)
++        : ChannelPublisherBuffer(std::vector<std::string>{topic})
++    {
++    }
++
++    explicit ChannelPublisherBuffer(const std::vector<std::string>& topics)
++    {
++        for (const auto& topic : topics) {
++            auto publisher = std::make_shared<unitree::robot::ChannelPublisher<MsgType>>(topic);
++            publisher->InitChannel();
++            publishers_.push_back(publisher);
++        }
++    }
++
++    bool trylock()
++    {
++        return mutex_.try_lock();
++    }
++
++    void publish()
++    {
++        MsgType outgoing = msg_;
++        for (const auto& publisher : publishers_) {
++            publisher->Write(outgoing, 0);
++        }
++    }
++
++    void unlockAndPublish()
++    {
++        mutex_.unlock();
++        publish();
++    }
++
++    MsgType msg_{};
++    std::mutex mutex_;
++
++protected:
++    std::vector<unitree::robot::ChannelPublisherPtr<MsgType>> publishers_;
++};
++
++class Go2LowStatePublisher : public ChannelPublisherBuffer<unitree_go::msg::dds_::LowState_>
++{
++public:
++    using MsgType = unitree_go::msg::dds_::LowState_;
++    using ChannelPublisherBuffer<MsgType>::ChannelPublisherBuffer;
++
++    std::shared_ptr<unitree::common::UnitreeJoystick> joystick = nullptr;
++
++    void unlockAndPublish()
++    {
++        if (joystick) {
++            const auto key = joystick->combine();
++            std::memcpy(this->msg_.wireless_remote().data(), key.buff, sizeof(key.buff));
++        }
++        this->msg_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&this->msg_), (sizeof(MsgType) >> 2) - 1);
++        ChannelPublisherBuffer<MsgType>::unlockAndPublish();
++    }
++};
++
++class G1LowStatePublisher : public ChannelPublisherBuffer<unitree_hg::msg::dds_::LowState_>
++{
++public:
++    using MsgType = unitree_hg::msg::dds_::LowState_;
++    using ChannelPublisherBuffer<MsgType>::ChannelPublisherBuffer;
++
++    std::shared_ptr<unitree::common::UnitreeJoystick> joystick = nullptr;
++
++    void unlockAndPublish()
++    {
++        if (joystick) {
++            const auto key = joystick->combine();
++            std::memcpy(this->msg_.wireless_remote().data(), key.buff, sizeof(key.buff));
++        }
++        this->msg_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&this->msg_), (sizeof(MsgType) >> 2) - 1);
++        ChannelPublisherBuffer<MsgType>::unlockAndPublish();
++    }
++};
++
++class Go2WirelessControllerPublisher : public ChannelPublisherBuffer<unitree_go::msg::dds_::WirelessController_>
++{
++public:
++    using MsgType = unitree_go::msg::dds_::WirelessController_;
++    using ChannelPublisherBuffer<MsgType>::ChannelPublisherBuffer;
++
++    std::shared_ptr<unitree::common::UnitreeJoystick> joystick = nullptr;
++
++    void unlockAndPublish()
++    {
++        if (joystick) {
++            const auto key = joystick->combine();
++            this->msg_.lx() = joystick->lx();
++            this->msg_.ly() = joystick->ly();
++            this->msg_.rx() = joystick->rx();
++            this->msg_.ry() = joystick->ry();
++            this->msg_.keys() = key.RF_RX.btn.value;
++        }
++        ChannelPublisherBuffer<MsgType>::unlockAndPublish();
++    }
++};
++
+ class UnitreeSDK2BridgeBase
+ {
+ public:
+@@ -148,21 +328,51 @@ protected:
+     }
+ };
+ 
+-template <typename LowCmd_t, typename LowState_t>
++template <typename LowCmdSub_t, typename LowStatePub_t, typename HighStatePub_t, typename WirelessControllerPub_t>
+ class RobotBridge : public UnitreeSDK2BridgeBase
+ {
+-using HighState_t = unitree::robot::go2::publisher::SportModeState;
+-using WirelessController_t = unitree::robot::go2::publisher::WirelessController;
+-
+ public:
+     RobotBridge(mjModel *model, mjData *data) : UnitreeSDK2BridgeBase(model, data)
+     {
+-        lowcmd = std::make_shared<LowCmd_t>("rt/lowcmd");
+-        lowstate = std::make_unique<LowState_t>();
+-        lowstate->joystick = joystick;
+-        highstate = std::make_unique<HighState_t>();
+-        wireless_controller = std::make_unique<WirelessController_t>();
+-        wireless_controller->joystick = joystick;
++        const bool rt_only = std::getenv("UNITREE_MUJOCO_RT_ONLY") != nullptr;
++        const std::vector<std::string> lowcmd_topics =
++            rt_only ? std::vector<std::string>{"rt/lowcmd"}
++                    : std::vector<std::string>{"rt/lowcmd", "lowcmd"};
++        const std::vector<std::string> lowstate_topics =
++            rt_only ? std::vector<std::string>{"rt/lowstate"}
++                    : std::vector<std::string>{"rt/lowstate", "lowstate"};
++        const std::vector<std::string> highstate_topics =
++            rt_only ? std::vector<std::string>{"rt/sportmodestate"}
++                    : std::vector<std::string>{"rt/sportmodestate", "sportmodestate"};
++        const std::vector<std::string> wireless_topics =
++            rt_only ? std::vector<std::string>{"rt/wirelesscontroller"}
++                    : std::vector<std::string>{"rt/wirelesscontroller", "wirelesscontroller"};
++
++        std::cout << "Bridge ctor stage: begin" << std::endl;
++
++        if (std::getenv("UNITREE_MUJOCO_SKIP_INIT_LOWCMD") == nullptr) {
++            std::cout << "Bridge ctor stage: init_lowcmd" << std::endl;
++            lowcmd = std::make_shared<LowCmdSub_t>(lowcmd_topics);
++        }
++
++        if (std::getenv("UNITREE_MUJOCO_SKIP_INIT_LOWSTATE") == nullptr) {
++            std::cout << "Bridge ctor stage: init_lowstate" << std::endl;
++            lowstate = std::make_unique<LowStatePub_t>(lowstate_topics);
++            lowstate->joystick = joystick;
++        }
++
++        if (std::getenv("UNITREE_MUJOCO_SKIP_INIT_HIGHSTATE") == nullptr) {
++            std::cout << "Bridge ctor stage: init_highstate" << std::endl;
++            highstate = std::make_unique<HighStatePub_t>(highstate_topics);
++        }
++
++        if (std::getenv("UNITREE_MUJOCO_SKIP_INIT_WIRELESS") == nullptr) {
++            std::cout << "Bridge ctor stage: init_wireless" << std::endl;
++            wireless_controller = std::make_unique<WirelessControllerPub_t>(wireless_topics);
++            wireless_controller->joystick = joystick;
++        }
++
++        std::cout << "Bridge ctor stage: end" << std::endl;
+     }
+ 
+     void start()
+@@ -173,10 +383,29 @@ public:
+ 
+     virtual void run()
+     {
++        static std::atomic<bool> first_run_logged{false};
++        const bool log_this_run = !first_run_logged.exchange(true);
++        if (log_this_run) {
++            std::cout << "Bridge run stage: enter" << std::endl;
++        }
++
++        if (std::getenv("UNITREE_MUJOCO_RUN_NOOP") != nullptr) {
++            if (log_this_run) {
++                std::cout << "Bridge run stage: noop_return" << std::endl;
++            }
++            return;
++        }
++
+         if(!mj_data_) return;
+-        if(lowstate->joystick) { lowstate->joystick->update(); }
++        if (log_this_run) {
++            std::cout << "Bridge run stage: have_mj_data" << std::endl;
++        }
++        if(lowstate && lowstate->joystick) { lowstate->joystick->update(); }
+         // lowcmd
+-        {
++        if (lowcmd && std::getenv("UNITREE_MUJOCO_SKIP_LOWCMD") == nullptr) {
++          if (log_this_run) {
++              std::cout << "Bridge run stage: lowcmd" << std::endl;
++          }
+             std::lock_guard<std::mutex> lock(lowcmd->mutex_);
+             for(int i(0); i<num_motor_; i++) {
+                 auto & m = lowcmd->msg_.motor_cmd()[i];
+@@ -187,7 +416,10 @@ public:
+         }
+ 
+         // lowstate
+-        if(lowstate->trylock()) {
++        if (lowstate && std::getenv("UNITREE_MUJOCO_SKIP_LOWSTATE") == nullptr && lowstate->trylock()) {
++            if (log_this_run) {
++                std::cout << "Bridge run stage: lowstate" << std::endl;
++            }
+             for(int i(0); i<num_motor_; i++) {
+                 lowstate->msg_.motor_state()[i].q() = mj_data_->sensordata[i];
+                 lowstate->msg_.motor_state()[i].dq() = mj_data_->sensordata[i + num_motor_];
+@@ -226,7 +458,10 @@ public:
+             lowstate->unlockAndPublish();
+         }
+         // highstate
+-        if(highstate->trylock()) {
++        if (highstate && std::getenv("UNITREE_MUJOCO_SKIP_HIGHSTATE") == nullptr && highstate->trylock()) {
++            if (log_this_run) {
++                std::cout << "Bridge run stage: highstate" << std::endl;
++            }
+             if(frame_pos_adr_ >= 0) {
+                 highstate->msg_.position()[0] = mj_data_->sensordata[frame_pos_adr_ + 0];
+                 highstate->msg_.position()[1] = mj_data_->sensordata[frame_pos_adr_ + 1];
+@@ -240,33 +475,45 @@ public:
+             highstate->unlockAndPublish();
+         }
+         // wireless_controller
+-        if(wireless_controller->joystick) {
++        if(wireless_controller && wireless_controller->joystick) {
++            if (log_this_run) {
++                std::cout << "Bridge run stage: wireless_controller" << std::endl;
++            }
+             wireless_controller->unlockAndPublish();
+         }
++
++        if (log_this_run) {
++            std::cout << "Bridge run stage: exit" << std::endl;
++        }
+     }
+ 
+-    std::unique_ptr<HighState_t> highstate;
+-    std::unique_ptr<WirelessController_t> wireless_controller;
+-    std::shared_ptr<LowCmd_t> lowcmd;
+-    std::unique_ptr<LowState_t> lowstate;
++    std::unique_ptr<HighStatePub_t> highstate;
++    std::unique_ptr<WirelessControllerPub_t> wireless_controller;
++    std::shared_ptr<LowCmdSub_t> lowcmd;
++    std::unique_ptr<LowStatePub_t> lowstate;
+     
+ private:
+     unitree::common::RecurrentThreadPtr thread_;
+ };
+ 
+-using Go2Bridge = RobotBridge<unitree::robot::go2::subscription::LowCmd, unitree::robot::go2::publisher::LowState>;
++using Go2LowCmdSubscriber = ChannelSubscriptionBuffer<unitree_go::msg::dds_::LowCmd_>;
++using G1LowCmdSubscriber = ChannelSubscriptionBuffer<unitree_hg::msg::dds_::LowCmd_>;
++using HighStatePublisher = ChannelPublisherBuffer<unitree_go::msg::dds_::SportModeState_>;
++using GenericWirelessControllerPublisher = Go2WirelessControllerPublisher;
++using Go2Bridge = RobotBridge<Go2LowCmdSubscriber, Go2LowStatePublisher, HighStatePublisher, GenericWirelessControllerPublisher>;
+ 
+-class G1Bridge : public RobotBridge<unitree::robot::g1::subscription::LowCmd, unitree::robot::g1::publisher::LowState>
++class G1Bridge : public RobotBridge<G1LowCmdSubscriber, G1LowStatePublisher, HighStatePublisher, GenericWirelessControllerPublisher>
+ {
+ public:
+-    G1Bridge(mjModel *model, mjData *data) : RobotBridge(model, data)
++    using Base = RobotBridge<G1LowCmdSubscriber, G1LowStatePublisher, HighStatePublisher, GenericWirelessControllerPublisher>;
++    using BmsState_t = ChannelPublisherBuffer<unitree_hg::msg::dds_::BmsState_>;
++    using IMUState_t = ChannelPublisherBuffer<unitree_hg::msg::dds_::IMUState_>;
++
++    G1Bridge(mjModel *model, mjData *data) : Base(model, data)
+     {
+         if (param::config.robot.find("g1") != std::string::npos) {
+-            auto* g1_lowstate = dynamic_cast<unitree::robot::g1::publisher::LowState*>(lowstate.get());
+-            if (g1_lowstate) {
+-                auto scene = param::config.robot_scene.filename().string();
+-                g1_lowstate->msg_.mode_machine() = scene.find("23") != std::string::npos ? 4 : 5;
+-            }
++            auto scene = param::config.robot_scene.filename().string();
++            lowstate->msg_.mode_machine() = scene.find("23") != std::string::npos ? 4 : 5;
+         }
+ 
+         bmsstate = std::make_unique<BmsState_t>("rt/lf/bmsstate");
+@@ -277,7 +524,7 @@ public:
+ 
+     void run() override
+     {
+-        RobotBridge::run();
++        Base::run();
+ 
+         // secondary IMU state
+         if (secondary_imustate->trylock()) {
+@@ -313,11 +560,9 @@ public:
+         }
+ 
+         // In practice, bmsstate is sent at a low frequency; here it is sent with the main loop
+-        bmsstate->unlockAndPublish();
++        bmsstate->publish();
+     }
+ 
+-    using BmsState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::BmsState_>;
+-    using IMUState_t = unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::IMUState_>;
+     std::unique_ptr<BmsState_t> bmsstate;
+     std::unique_ptr<IMUState_t> secondary_imustate;
+ };
+diff --git a/example/cpp/COLCON_IGNORE b/example/cpp/COLCON_IGNORE
+new file mode 100644
+index 0000000..3785750
+--- /dev/null
++++ b/example/cpp/COLCON_IGNORE
+@@ -0,0 +1,2 @@
++This directory is a plain CMake example with the same project name as the ROS 2 stand_go2 package.
++Ignore it during colcon discovery so the ROS 2 example remains buildable in the shared workspace.
+diff --git a/simulate/src/unitree_joystick.hpp b/simulate/src/unitree_joystick.hpp
+new file mode 100644
+index 0000000..223f7a8
+--- /dev/null
++++ b/simulate/src/unitree_joystick.hpp
+@@ -0,0 +1,223 @@
++// Copyright (c) 2025, Unitree Robotics Co., Ltd.
++// All rights reserved.
++
++#pragma once
++
++#include <chrono>
++#include <cmath>
++#include <cstdint>
++
++namespace unitree
++{
++namespace common
++{
++
++typedef union
++{
++  struct
++  {
++    uint8_t R1 : 1;
++    uint8_t L1 : 1;
++    uint8_t Start : 1;
++    uint8_t Select : 1;
++    uint8_t R2 : 1;
++    uint8_t L2 : 1;
++    uint8_t f1 : 1;
++    uint8_t f2 : 1;
++    uint8_t A : 1;
++    uint8_t B : 1;
++    uint8_t X : 1;
++    uint8_t Y : 1;
++    uint8_t up : 1;
++    uint8_t right : 1;
++    uint8_t down : 1;
++    uint8_t left : 1;
++  } components;
++
++  uint16_t value;
++} BtnUnion;
++
++typedef struct
++{
++  uint8_t head[2];
++  BtnUnion btn;
++  float lx;
++  float rx;
++  float ry;
++  float L2;
++  float ly;
++} BtnDataStruct;
++
++typedef union
++{
++  BtnDataStruct RF_RX;
++  uint8_t buff[40];
++} REMOTE_DATA_RX;
++
++class KeyBase
++{
++public:
++  KeyBase() = default;
++
++  bool pressed = false;
++  bool on_pressed = false;
++  bool on_released = false;
++  int click_cnt = 0;
++  float pressed_time = 0.0;
++
++protected:
++  void update(bool is_pressed)
++  {
++    pressed = is_pressed;
++    on_pressed = (pressed && !last_pressed_);
++    on_released = (!pressed && last_pressed_);
++    last_pressed_ = pressed;
++
++    auto now = std::chrono::steady_clock::now();
++    if (on_pressed)
++    {
++      if (std::chrono::duration<float>(now - last_click_time_).count() < double_click_threshold_) {
++        click_cnt++;
++      } else {
++        click_cnt = 1;
++      }
++      last_click_time_ = now;
++    }
++
++    if (pressed) {
++      pressed_time = std::chrono::duration<float>(now - last_click_time_).count();
++    }
++    if (!(pressed || on_released)) {
++      pressed_time = 0.0;
++    }
++  }
++
++private:
++  bool last_pressed_{false};
++  std::chrono::time_point<std::chrono::steady_clock> last_click_time_{};
++  const float double_click_threshold_{0.5f};
++};
++
++template <typename T>
++class Button : public KeyBase
++{
++public:
++  void operator()(const T& data)
++  {
++    bool is_pressed = (data != data_null_);
++    update(is_pressed);
++    data_ = data;
++  }
++
++  const T& operator()() { return data_; }
++
++private:
++  T data_{};
++  T data_null_{};
++};
++
++class Axis : public KeyBase
++{
++public:
++  void operator()(const float& data)
++  {
++    auto data_deadzone = std::fabs(data) < deadzone ? 0.0f : data;
++    float new_data = data_ * (1.0f - smooth) + data_deadzone * smooth;
++    bool is_pressed = (new_data > threshold);
++    update(is_pressed);
++    data_ = new_data;
++  }
++
++  const float& operator()() { return data_; }
++
++  float smooth = 0.03f;
++  float deadzone = 0.01f;
++  float threshold = 0.5f;
++
++private:
++  float data_{};
++};
++
++class UnitreeJoystick
++{
++public:
++  UnitreeJoystick() = default;
++
++  Button<int> back;
++  Button<int> start;
++  Button<int> LS;
++  Button<int> RS;
++  Button<int> LB;
++  Button<int> RB;
++  Button<int> A;
++  Button<int> B;
++  Button<int> X;
++  Button<int> Y;
++  Button<int> up;
++  Button<int> down;
++  Button<int> left;
++  Button<int> right;
++  Button<int> F1;
++  Button<int> F2;
++  Axis lx;
++  Axis ly;
++  Axis rx;
++  Axis ry;
++  Axis LT;
++  Axis RT;
++
++  virtual void update() {}
++
++  void extract(const REMOTE_DATA_RX& key)
++  {
++    back(key.RF_RX.btn.components.Select);
++    start(key.RF_RX.btn.components.Start);
++    LB(key.RF_RX.btn.components.L1);
++    RB(key.RF_RX.btn.components.R1);
++    F1(key.RF_RX.btn.components.f1);
++    F2(key.RF_RX.btn.components.f2);
++    A(key.RF_RX.btn.components.A);
++    B(key.RF_RX.btn.components.B);
++    X(key.RF_RX.btn.components.X);
++    Y(key.RF_RX.btn.components.Y);
++    up(key.RF_RX.btn.components.up);
++    down(key.RF_RX.btn.components.down);
++    left(key.RF_RX.btn.components.left);
++    right(key.RF_RX.btn.components.right);
++    LT(key.RF_RX.btn.components.L2);
++    RT(key.RF_RX.btn.components.R2);
++    lx(key.RF_RX.lx);
++    ly(key.RF_RX.ly);
++    rx(key.RF_RX.rx);
++    ry(key.RF_RX.ry);
++  }
++
++  REMOTE_DATA_RX combine()
++  {
++    REMOTE_DATA_RX key{};
++    key.RF_RX.btn.components.Select = back();
++    key.RF_RX.btn.components.Start = start();
++    key.RF_RX.btn.components.L1 = LB();
++    key.RF_RX.btn.components.R1 = RB();
++    key.RF_RX.btn.components.f1 = F1();
++    key.RF_RX.btn.components.f2 = F2();
++    key.RF_RX.btn.components.A = A();
++    key.RF_RX.btn.components.B = B();
++    key.RF_RX.btn.components.X = X();
++    key.RF_RX.btn.components.Y = Y();
++    key.RF_RX.btn.components.up = up();
++    key.RF_RX.btn.components.down = down();
++    key.RF_RX.btn.components.left = left();
++    key.RF_RX.btn.components.right = right();
++    key.RF_RX.btn.components.L2 = LT() > 0.5f ? 1 : 0;
++    key.RF_RX.btn.components.R2 = RT() > 0.5f ? 1 : 0;
++    key.RF_RX.lx = lx();
++    key.RF_RX.ly = ly();
++    key.RF_RX.rx = rx();
++    key.RF_RX.ry = ry();
++    return key;
++  }
++};
++
++}  // namespace common
++}  // namespace unitree
