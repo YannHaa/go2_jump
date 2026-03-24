@@ -54,7 +54,7 @@ back to the official upstream sources automatically.
 For a fresh clone from GitHub, prefer:
 
 ```bash
-git clone --recurse-submodules https://github.com/matrix050628/go_jump.git /home/hayan/go2_jump_ws
+git clone --recurse-submodules https://github.com/matrix050628/go2_jump.git /home/hayan/go2_jump_ws
 cd /home/hayan/go2_jump_ws
 ./scripts/bootstrap_workspace_repo.sh
 ```
