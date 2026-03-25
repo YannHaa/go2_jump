@@ -1,0 +1,274 @@
+# Go2 Jump Workspace 中文文档
+
+[English](README.md)
+
+## 项目定位
+
+这个仓库是一个面向教学和实验迭代的 Go2 前跳项目。项目目标不是直接做一套可上机器人实机的完整最优控制器，而是先搭建一条清晰、可运行、可验证、可调参的最小闭环链路：
+
+- 使用 `unitree_mujoco` 作为主仿真平台
+- 使用 `unitree_ros2` 打通 `LowCmd` 和 `LowState`
+- 在 sport mode 之下做低层关节控制
+
+当前版本聚焦于平地、短距离、左右对称前跳。
+
+## 你能从这个项目学到什么
+
+- 如何组织一个基于 ROS 2 Humble 的 Go2 仿真项目
+- 如何在 MuJoCo 中验证低层 `LowCmd` 是否真的生效
+- 如何把“目标距离”映射到一个参数化的跳跃动作
+- 如何用试验报告和扫参脚本逐步优化跳跃效果
+- 如何把一个实验项目整理成可复现、可维护的工程仓库
+
+## 建议阅读顺序
+
+如果你是第一次接触这个项目，建议按下面顺序阅读和操作：
+
+1. 先读本文件，完成第一次构建和第一次单次试验。
+2. 再读 [控制链路说明](docs/control_stack.md)，理解运行时数据怎么流动。
+3. 接着读 [调参流程](docs/calibration_workflow.md)，理解怎么读报告、怎么做 sweep。
+4. 如果准备改代码或改依赖，再读 [开发流程](docs/development_workflow.md)。
+
+## 项目范围
+
+### 当前已经包含
+
+- Docker 化的 ROS 2 Humble 开发环境
+- Go2 的 Unitree MuJoCo 仿真
+- `LowCmd` / `LowState` 低层通信链路
+- 参数化的前跳控制器
+- 单次试验、日志归档、试验报告
+- 起跳速度和空中前移能力的基础调参脚本
+
+### 当前不包含
+
+- sport mode 的 `frontJump`
+- 直接用于实机的控制安全机制
+- 接触丰富的最优控制
+- 完整的状态估计与感知系统
+
+## 已验证环境基线
+
+当前仓库按照以下基线完成过验证：
+
+- Ubuntu 22.04
+- Docker 中运行 ROS 2 Humble
+- `unitree_ros2` 与 `unitree_mujoco` 作为 submodule 管理
+- 低层话题链路：
+  `rt/lowcmd`、`rt/lowstate`、`/lowcmd`、`/lowstate`、`/sportmodestate`
+
+项目采用 Docker 的目的很明确：保证 ROS 2、MuJoCo 和 Unitree SDK 的运行环境可复现。
+
+## 目录说明
+
+- `src/unitree_ros2`
+  官方 Unitree ROS 2 仓库，作为 submodule 管理。
+- `src/unitree_mujoco`
+  官方 Unitree MuJoCo 仓库，作为 submodule 管理。
+- `src/go2_jump_planner`
+  负责跳跃参数生成和目标发布。
+- `src/go2_jump_controller`
+  负责低层控制、相位机和试验报告。
+- `src/go2_jump_bringup`
+  负责 launch 文件和公共参数。
+- `scripts/`
+  负责构建、启动、验证、扫参。
+- `tools/`
+  负责直接 DDS 验证工具。
+- `patches/`
+  保存对上游 submodule 的本地补丁。
+- `docs/`
+  保存架构、调参、开发相关文档。
+
+## 快速开始
+
+### 1. 克隆仓库
+
+```bash
+git clone --recurse-submodules https://github.com/matrix050628/go2_jump.git /home/hayan/go2_jump_ws
+cd /home/hayan/go2_jump_ws
+```
+
+### 2. 初始化工作区
+
+```bash
+./scripts/bootstrap_workspace_repo.sh
+./scripts/bootstrap_third_party.sh
+```
+
+其中：
+
+- `bootstrap_workspace_repo.sh` 会初始化 submodule，并自动应用
+  `unitree_mujoco` 的兼容补丁
+- `bootstrap_third_party.sh` 会准备第三方依赖缓存
+
+### 3. 构建 Docker 镜像
+
+```bash
+./scripts/docker_build_image.sh
+```
+
+### 4. 构建工作区
+
+```bash
+./scripts/docker_build_workspace.sh
+```
+
+这一步会完成以下主要构建任务：
+
+- `unitree_ros2` 相关依赖包
+- `go2_jump_planner`
+- `go2_jump_controller`
+- `go2_jump_bringup`
+- `tools/verify_rt_lowcmd`
+- `unitree_mujoco`
+
+### 5. 启动 MuJoCo 仿真
+
+```bash
+./scripts/docker_run_go2_mujoco.sh
+```
+
+如果宿主机没有图形桌面，会自动启动 `Xvfb`，保证 MuJoCo 的渲染循环和 DDS bridge 能稳定运行。
+
+### 6. 启动跳跃控制栈
+
+另开一个终端：
+
+```bash
+cd /home/hayan/go2_jump_ws
+./scripts/docker_launch_jump_stack.sh 0.25
+```
+
+### 7. 直接运行一次完整试验
+
+如果你只想快速确认项目能不能跑通，推荐直接用单次试验脚本：
+
+```bash
+cd /home/hayan/go2_jump_ws
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+这个脚本会自动完成：
+
+- 启动一个新的仿真实例
+- 等待 `/lowstate` 稳定
+- 启动 planner 和 controller
+- 等待新的试验报告生成
+- 归档日志和报告
+- 关闭运行时容器
+
+## 两种标准验证方式
+
+### 方式一：直接验证低层 DDS
+
+```bash
+./scripts/docker_verify_rt_lowcmd.sh
+```
+
+这个脚本适合回答一个非常具体的问题：
+
+“现在的 `LowCmd` 到底有没有真正驱动仿真中的关节？”
+
+它会绕开 ROS 2 控制器，直接对 `rt/lowcmd` / `rt/lowstate` 做验证。
+
+### 方式二：验证完整前跳闭环
+
+```bash
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+这个脚本适合验证完整链路是否打通：
+
+- MuJoCo 仿真
+- `/lowstate`
+- planner
+- controller
+- `/lowcmd`
+- 报告生成
+
+## 如何读试验报告
+
+如果你只看一个指标，很容易误判“跳得更好了”。建议至少同时看下面四项：
+
+- `final_forward_displacement_m`
+  最终稳定后的前向位移。
+- `landing_forward_displacement_m`
+  落地检测时的前向位移。
+- `airborne_forward_progress_m`
+  从起跳到落地之间的空中前向位移。
+- `post_landing_forward_gain_m`
+  落地之后又向前补出来的位移。
+
+对于这个项目，`airborne_forward_progress_m` 更能反映“是不是真的跳出去了”，而 `final_forward_displacement_m` 更像“最后停在了哪里”。
+
+## 调参入口
+
+### 1. 标定起跳速度
+
+```bash
+./scripts/sweep_takeoff_speed_scale.sh 0.20,0.25,0.30 1.00,1.03,1.06 1
+```
+
+这个 sweep 解决的是“给定目标距离，起跳速度应该放大多少”。
+
+### 2. 优化空中前移能力
+
+```bash
+./scripts/sweep_airborne_push_pitch.sh 0.25 0.88,0.92,0.96 1.08,1.12,1.16 -8.0,-5.0,-2.0 -2.0,0.0 1
+```
+
+这个 sweep 解决的是“在目标距离固定时，如何让真正的空中前移更明显”。它会比较：
+
+- `airborne_forward_progress_m`
+- `airborne_completion_ratio`
+- 最终位移误差
+
+## 当前参考参数
+
+### 起跳速度曲线
+
+当前距离到 `takeoff_speed_scale` 的标定结果是：
+
+- `0.20 m -> 1.09`
+- `0.25 m -> 1.06`
+- `0.30 m -> 1.06`
+
+### 当前默认参数
+
+仓库默认采用的是一组“保守改进档”参数：
+
+- `push_front_tau_scale = 0.96`
+- `push_rear_tau_scale = 1.12`
+- `push_pitch_target_deg = -5.0`
+- `flight_pitch_target_deg = -2.0`
+
+这组参数的目标是：
+
+- 比旧默认值有更好的空中前移
+- 同时尽量保持 `0.25 m` 目标附近的最终位移精度
+
+### 当前激进探索参数
+
+在 2026 年 3 月 25 日的 focused airborne sweep 中，空中前移最强的一组参数是：
+
+- `push_front_tau_scale = 0.96`
+- `push_rear_tau_scale = 1.12`
+- `push_pitch_target_deg = -2.0`
+- `flight_pitch_target_deg = 0.0`
+
+这组参数可以把 `airborne_forward_progress_m` 提高到约 `0.0655 m`，但最终位移会超到约 `0.306 m`，因此更适合作为探索模式，而不是默认设置。
+
+## 当前局限
+
+- `foot_force_est` 仍然为零，因此落地检测仍是启发式的
+- 真正的空中前移仍明显小于最终稳定位置
+- 落地后的恢复动作仍然会贡献较大的前向位移
+- 当前版本是仿真优先版本，不应直接视为实机控制器
+
+## 文档索引
+
+- [English README](README.md)
+- [控制链路说明](docs/control_stack.md)
+- [调参流程](docs/calibration_workflow.md)
+- [开发流程](docs/development_workflow.md)
