@@ -266,9 +266,9 @@ The calibrated distance-to-speed curve is:
 - `0.25 m -> 1.06`
 - `0.30 m -> 1.06`
 
-### Current Default
+### YAML Baseline
 
-The current default is no longer just a push/flight tuning set. It now combines:
+The YAML default remains the quickest regression check for the stack. It combines:
 
 - `takeoff_angle_deg = 35.0`
 - `push_front_tau_scale = 0.96`
@@ -278,44 +278,70 @@ The current default is no longer just a push/flight tuning set. It now combines:
 - `landing_support_blend = 0.40`
 - `landing_touchdown_reference_blend = 0.80`
 
-This is the best current all-around default because it reduces recovery-dominated
-fake gains without falling back to the unstable full touchdown-hold path.
+The March 25, 2026 baseline report at `0.25 m` (`reports/jump_metrics/trial_20260325_195717.txt`)
+recorded approximately:
 
-In the latest default `0.25 m` validations on March 25, 2026, the stack produced
-approximately:
+- `final_forward_displacement_m ~= 0.335`
+- `airborne_forward_progress_m ~= 0.111`
+- `post_landing_forward_gain_m ~= 0.223`
+- `landing_pitch_deg ~= -58.1`
+- `final_pitch_deg ~= -33.7`
 
-- `final_forward_displacement_m ~= 0.33-0.35`
-- `airborne_forward_progress_m ~= 0.11`
-- `post_landing_forward_gain_m ~= 0.23`
-- `final_pitch_deg ~= -28`
+This is still useful as a stable baseline, but it does not yet satisfy the project
+goal of a mostly-airborne forward jump.
 
-This is still not a clean mostly-airborne jump, but it is a better engineering
-starting point than the older default, which relied much more heavily on
-post-landing motion.
+### Current Experimental Airborne Reference
 
-### Aggressive Airborne Probe
+The current best near-target airborne-first probe is now:
 
-The strongest airborne result in the latest focused sweep used:
+```bash
+./scripts/run_airborne_priority_trial.sh 0.25
+```
 
-- `push_front_tau_scale = 0.96`
-- `push_rear_tau_scale = 1.12`
-- `push_pitch_target_deg = -2.0`
-- `flight_pitch_target_deg = 0.0`
+That helper currently sets:
 
-This setting increased `airborne_forward_progress_m` to approximately `0.0655 m` in
-the March 25, 2026 sweep, but it also pushed the final displacement to roughly
-`0.306 m`. It is best treated as an exploration mode rather than the default.
+- `takeoff_speed_scale = 1.04`
+- `push_front_tau_scale = 1.04`
+- `push_rear_tau_scale = 1.04`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
+- `push_front_compact_delta_rad = -0.155`
+- `push_rear_compact_delta_rad = 0.055`
+- `flight_front_compact_delta_rad = 0.24`
+- `flight_rear_compact_delta_rad = -0.14`
+- `support_thigh_rad = 1.06`
+- `support_calf_rad = -2.04`
+- `support_front_compact_delta_rad = -0.04`
+- `support_rear_compact_delta_rad = 0.12`
+- `landing_support_blend = 0.30`
+- `recovery_upright_blend = 0.70`
 
-### First Retuned Aggressive Reference
+Repeated March 25, 2026 validations
+(`reports/jump_metrics/trial_20260325_222842.txt` and
+`reports/jump_metrics/trial_20260325_222913.txt`) recorded approximately:
 
-A single validation run on March 25, 2026 kept the aggressive airborne profile and
-reduced `takeoff_speed_scale` to `1.00`:
+- `final_forward_displacement_m ~= 0.253-0.255`
+- `airborne_forward_progress_m ~= 0.163-0.165`
+- `post_landing_forward_gain_m ~= 0.060-0.063`
+- `landing_pitch_deg ~= -46.7 to -48.0`
+- `final_pitch_deg ~= -39.4 to -39.6`
 
-- `final_forward_displacement_m ~= 0.2593`
-- `airborne_forward_progress_m ~= 0.0527`
+This is the current best engineering tradeoff in the repository: most of the
+forward motion is now completed in flight, the post-landing catch-up is much
+smaller than the YAML baseline, and the body attitude is noticeably more natural.
 
-This is a useful next candidate when the goal is to keep a stronger airborne motion
-without overshooting the `0.25 m` target as badly as the untuned aggressive setup.
+### Naturality-First Nearby Variant
+
+A slightly more upright nearby variant used:
+
+- `push_front_compact_delta_rad = -0.15`
+- `push_rear_compact_delta_rad = 0.06`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
+
+That variant reduced touchdown pitch further to roughly `-44.9 to -45.3 deg` and
+kept `post_landing_forward_gain_m` around `0.047-0.056 m`, but it typically
+finished slightly short at roughly `0.234-0.244 m`.
 
 ### Controller Snapshot on March 25, 2026
 
@@ -326,27 +352,27 @@ The latest controller iteration added:
 - forward-bias shaping in `crouch` and `push`
 - a support-hold landing path with extra recovery diagnostics
 - continuous touchdown-reference blending for landing support tuning
+- launch and script overrides for `push/flight/landing` compactness surfaces
 
 What this changed in practice:
 
 - the controller now separates post-landing motion into
   `support_hold_forward_gain_m` and `release_to_complete_forward_gain_m`
-- partial touchdown-reference blending can pull `post_landing_forward_gain_m`
-  down into the `0.20-0.24 m` range at `0.25 m` target trials
-- full touchdown-hold style settings can get closer to the distance target, but
-  they still leave the body too nose-down after landing
-- the jump is therefore closer to a real forward jump than before, but it still
-  does not satisfy the project goal of completing most of the distance in flight
+- aggressive push/flight pitch targets plus explicit compactness-shape tuning can
+  pull `airborne_forward_progress_m` into the `0.16 m` range at `0.25 m` target trials
+- the current best experimental reference now keeps `post_landing_forward_gain_m`
+  near `0.06 m` while staying near the requested target distance
+- touchdown posture is still visibly nose-down, but materially cleaner than the
+  older landing-support baseline
 
 ## Current Known Limitations
 
 - `foot_force_est` is still zero in the present MuJoCo bridge path, so touchdown
   detection is heuristic.
-- airborne range is still smaller than final settled displacement
-- even the best current default still relies on roughly `0.22 m` of post-landing
-  motion at a `0.25 m` target
-- the best near-target landing-support variants still finish with too much
-  nose-down attitude after touchdown
+- the current best experimental reference still settles about `0.06 m` beyond the
+  measured airborne progress
+- even the improved experimental reference still lands nose-down at roughly
+  `-46 to -48 deg`
 - the project is simulation-first and should not be treated as a hardware-ready jump
   controller
 

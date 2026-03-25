@@ -25,9 +25,17 @@ def generate_launch_description():
     push_pitch_compactness_gain = LaunchConfiguration(
         "push_pitch_compactness_gain"
     )
+    push_pitch_rate_gain = LaunchConfiguration("push_pitch_rate_gain")
+    push_pitch_correction_limit_rad = LaunchConfiguration(
+        "push_pitch_correction_limit_rad"
+    )
     flight_pitch_target_deg = LaunchConfiguration("flight_pitch_target_deg")
     flight_pitch_compactness_gain = LaunchConfiguration(
         "flight_pitch_compactness_gain"
+    )
+    flight_pitch_rate_gain = LaunchConfiguration("flight_pitch_rate_gain")
+    flight_pitch_correction_limit_rad = LaunchConfiguration(
+        "flight_pitch_correction_limit_rad"
     )
     flight_landing_prep_height_m = LaunchConfiguration(
         "flight_landing_prep_height_m"
@@ -45,6 +53,10 @@ def generate_launch_description():
     landing_pitch_compactness_gain = LaunchConfiguration(
         "landing_pitch_compactness_gain"
     )
+    landing_pitch_rate_gain = LaunchConfiguration("landing_pitch_rate_gain")
+    landing_pitch_correction_limit_rad = LaunchConfiguration(
+        "landing_pitch_correction_limit_rad"
+    )
     support_pitch_target_deg = LaunchConfiguration("support_pitch_target_deg")
     support_pitch_compactness_gain = LaunchConfiguration(
         "support_pitch_compactness_gain"
@@ -55,6 +67,24 @@ def generate_launch_description():
     )
     crouch_forward_bias_rad = LaunchConfiguration("crouch_forward_bias_rad")
     push_forward_bias_rad = LaunchConfiguration("push_forward_bias_rad")
+    push_front_compact_delta_rad = LaunchConfiguration(
+        "push_front_compact_delta_rad"
+    )
+    push_rear_compact_delta_rad = LaunchConfiguration(
+        "push_rear_compact_delta_rad"
+    )
+    flight_front_compact_delta_rad = LaunchConfiguration(
+        "flight_front_compact_delta_rad"
+    )
+    flight_rear_compact_delta_rad = LaunchConfiguration(
+        "flight_rear_compact_delta_rad"
+    )
+    landing_front_compact_delta_rad = LaunchConfiguration(
+        "landing_front_compact_delta_rad"
+    )
+    landing_rear_compact_delta_rad = LaunchConfiguration(
+        "landing_rear_compact_delta_rad"
+    )
     landing_absorption_blend = LaunchConfiguration("landing_absorption_blend")
     support_hip_rad = LaunchConfiguration("support_hip_rad")
     support_thigh_rad = LaunchConfiguration("support_thigh_rad")
@@ -104,9 +134,17 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "push_pitch_compactness_gain", default_value="0.35"
             ),
+            DeclareLaunchArgument("push_pitch_rate_gain", default_value="0.03"),
+            DeclareLaunchArgument(
+                "push_pitch_correction_limit_rad", default_value="0.08"
+            ),
             DeclareLaunchArgument("flight_pitch_target_deg", default_value="-2.0"),
             DeclareLaunchArgument(
                 "flight_pitch_compactness_gain", default_value="0.55"
+            ),
+            DeclareLaunchArgument("flight_pitch_rate_gain", default_value="0.05"),
+            DeclareLaunchArgument(
+                "flight_pitch_correction_limit_rad", default_value="0.18"
             ),
             DeclareLaunchArgument(
                 "flight_landing_prep_height_m", default_value="0.14"
@@ -126,6 +164,10 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "landing_pitch_compactness_gain", default_value="0.40"
             ),
+            DeclareLaunchArgument("landing_pitch_rate_gain", default_value="0.04"),
+            DeclareLaunchArgument(
+                "landing_pitch_correction_limit_rad", default_value="0.12"
+            ),
             DeclareLaunchArgument("support_pitch_target_deg", default_value="-2.0"),
             DeclareLaunchArgument(
                 "support_pitch_compactness_gain", default_value="0.65"
@@ -136,6 +178,24 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("crouch_forward_bias_rad", default_value="0.08"),
             DeclareLaunchArgument("push_forward_bias_rad", default_value="0.05"),
+            DeclareLaunchArgument(
+                "push_front_compact_delta_rad", default_value="-0.18"
+            ),
+            DeclareLaunchArgument(
+                "push_rear_compact_delta_rad", default_value="0.04"
+            ),
+            DeclareLaunchArgument(
+                "flight_front_compact_delta_rad", default_value="0.20"
+            ),
+            DeclareLaunchArgument(
+                "flight_rear_compact_delta_rad", default_value="-0.10"
+            ),
+            DeclareLaunchArgument(
+                "landing_front_compact_delta_rad", default_value="-0.08"
+            ),
+            DeclareLaunchArgument(
+                "landing_rear_compact_delta_rad", default_value="0.14"
+            ),
             DeclareLaunchArgument("landing_absorption_blend", default_value="0.45"),
             DeclareLaunchArgument("support_hip_rad", default_value="0.036"),
             DeclareLaunchArgument("support_thigh_rad", default_value="1.126"),
@@ -181,6 +241,12 @@ def generate_launch_description():
                         "use_takeoff_speed_scale_curve": use_takeoff_speed_scale_curve,
                         "crouch_forward_bias_rad": crouch_forward_bias_rad,
                         "push_forward_bias_rad": push_forward_bias_rad,
+                        "push_front_compact_delta_rad": push_front_compact_delta_rad,
+                        "push_rear_compact_delta_rad": push_rear_compact_delta_rad,
+                        "flight_front_compact_delta_rad": flight_front_compact_delta_rad,
+                        "flight_rear_compact_delta_rad": flight_rear_compact_delta_rad,
+                        "landing_front_compact_delta_rad": landing_front_compact_delta_rad,
+                        "landing_rear_compact_delta_rad": landing_rear_compact_delta_rad,
                         "landing_absorption_blend": landing_absorption_blend,
                         "support_hip_rad": support_hip_rad,
                         "support_thigh_rad": support_thigh_rad,
@@ -209,20 +275,32 @@ def generate_launch_description():
                         "landing_rear_tau_scale": landing_rear_tau_scale,
                         "push_pitch_target_deg": push_pitch_target_deg,
                         "push_pitch_compactness_gain": push_pitch_compactness_gain,
+                        "push_pitch_rate_gain": push_pitch_rate_gain,
+                        "push_pitch_correction_limit_rad": push_pitch_correction_limit_rad,
                         "flight_pitch_target_deg": flight_pitch_target_deg,
                         "flight_pitch_compactness_gain": flight_pitch_compactness_gain,
+                        "flight_pitch_rate_gain": flight_pitch_rate_gain,
+                        "flight_pitch_correction_limit_rad": flight_pitch_correction_limit_rad,
                         "flight_landing_prep_height_m": flight_landing_prep_height_m,
                         "flight_landing_prep_start_descent_speed_mps": flight_landing_prep_start_descent_speed_mps,
                         "flight_landing_prep_full_descent_speed_mps": flight_landing_prep_full_descent_speed_mps,
                         "flight_landing_prep_max_blend": flight_landing_prep_max_blend,
                         "landing_pitch_target_deg": landing_pitch_target_deg,
                         "landing_pitch_compactness_gain": landing_pitch_compactness_gain,
+                        "landing_pitch_rate_gain": landing_pitch_rate_gain,
+                        "landing_pitch_correction_limit_rad": landing_pitch_correction_limit_rad,
                         "support_pitch_target_deg": support_pitch_target_deg,
                         "support_pitch_compactness_gain": support_pitch_compactness_gain,
                         "support_pitch_rate_gain": support_pitch_rate_gain,
                         "support_pitch_correction_limit_rad": support_pitch_correction_limit_rad,
                         "crouch_forward_bias_rad": crouch_forward_bias_rad,
                         "push_forward_bias_rad": push_forward_bias_rad,
+                        "push_front_compact_delta_rad": push_front_compact_delta_rad,
+                        "push_rear_compact_delta_rad": push_rear_compact_delta_rad,
+                        "flight_front_compact_delta_rad": flight_front_compact_delta_rad,
+                        "flight_rear_compact_delta_rad": flight_rear_compact_delta_rad,
+                        "landing_front_compact_delta_rad": landing_front_compact_delta_rad,
+                        "landing_rear_compact_delta_rad": landing_rear_compact_delta_rad,
                         "landing_absorption_blend": landing_absorption_blend,
                         "support_hip_rad": support_hip_rad,
                         "support_thigh_rad": support_thigh_rad,

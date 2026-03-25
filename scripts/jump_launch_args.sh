@@ -44,10 +44,18 @@ build_jump_launch_args() {
     "${GO2_JUMP_PUSH_PITCH_TARGET_DEG:-}"
   append_optional_launch_arg "${array_name}" "push_pitch_compactness_gain" \
     "${GO2_JUMP_PUSH_PITCH_COMPACTNESS_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "push_pitch_rate_gain" \
+    "${GO2_JUMP_PUSH_PITCH_RATE_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "push_pitch_correction_limit_rad" \
+    "${GO2_JUMP_PUSH_PITCH_CORRECTION_LIMIT_RAD:-}"
   append_optional_launch_arg "${array_name}" "flight_pitch_target_deg" \
     "${GO2_JUMP_FLIGHT_PITCH_TARGET_DEG:-}"
   append_optional_launch_arg "${array_name}" "flight_pitch_compactness_gain" \
     "${GO2_JUMP_FLIGHT_PITCH_COMPACTNESS_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "flight_pitch_rate_gain" \
+    "${GO2_JUMP_FLIGHT_PITCH_RATE_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "flight_pitch_correction_limit_rad" \
+    "${GO2_JUMP_FLIGHT_PITCH_CORRECTION_LIMIT_RAD:-}"
   append_optional_launch_arg "${array_name}" "flight_landing_prep_height_m" \
     "${GO2_JUMP_FLIGHT_LANDING_PREP_HEIGHT_M:-}"
   append_optional_launch_arg "${array_name}" \
@@ -62,6 +70,10 @@ build_jump_launch_args() {
     "${GO2_JUMP_LANDING_PITCH_TARGET_DEG:-}"
   append_optional_launch_arg "${array_name}" "landing_pitch_compactness_gain" \
     "${GO2_JUMP_LANDING_PITCH_COMPACTNESS_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "landing_pitch_rate_gain" \
+    "${GO2_JUMP_LANDING_PITCH_RATE_GAIN:-}"
+  append_optional_launch_arg "${array_name}" "landing_pitch_correction_limit_rad" \
+    "${GO2_JUMP_LANDING_PITCH_CORRECTION_LIMIT_RAD:-}"
   append_optional_launch_arg "${array_name}" "support_pitch_target_deg" \
     "${GO2_JUMP_SUPPORT_PITCH_TARGET_DEG:-}"
   append_optional_launch_arg "${array_name}" "support_pitch_compactness_gain" \
@@ -74,6 +86,18 @@ build_jump_launch_args() {
     "${GO2_JUMP_CROUCH_FORWARD_BIAS_RAD:-}"
   append_optional_launch_arg "${array_name}" "push_forward_bias_rad" \
     "${GO2_JUMP_PUSH_FORWARD_BIAS_RAD:-}"
+  append_optional_launch_arg "${array_name}" "push_front_compact_delta_rad" \
+    "${GO2_JUMP_PUSH_FRONT_COMPACT_DELTA_RAD:-}"
+  append_optional_launch_arg "${array_name}" "push_rear_compact_delta_rad" \
+    "${GO2_JUMP_PUSH_REAR_COMPACT_DELTA_RAD:-}"
+  append_optional_launch_arg "${array_name}" "flight_front_compact_delta_rad" \
+    "${GO2_JUMP_FLIGHT_FRONT_COMPACT_DELTA_RAD:-}"
+  append_optional_launch_arg "${array_name}" "flight_rear_compact_delta_rad" \
+    "${GO2_JUMP_FLIGHT_REAR_COMPACT_DELTA_RAD:-}"
+  append_optional_launch_arg "${array_name}" "landing_front_compact_delta_rad" \
+    "${GO2_JUMP_LANDING_FRONT_COMPACT_DELTA_RAD:-}"
+  append_optional_launch_arg "${array_name}" "landing_rear_compact_delta_rad" \
+    "${GO2_JUMP_LANDING_REAR_COMPACT_DELTA_RAD:-}"
   append_optional_launch_arg "${array_name}" "landing_absorption_blend" \
     "${GO2_JUMP_LANDING_ABSORPTION_BLEND:-}"
   append_optional_launch_arg "${array_name}" "support_hip_rad" \

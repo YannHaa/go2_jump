@@ -242,46 +242,61 @@ GO2_JUMP_LANDING_TOUCHDOWN_REFERENCE_BLEND=0.80 \
 - 一个实验性的 touchdown-hold 落地分支能明显压低落地后的前向补位，
   但当前还不够稳定，不能直接升级为默认落地策略
 
-### 2026 年 3 月 25 日 Landing-Support 迭代
+### 2026 年 3 月 25 日 Airborne-First 参考组
 
-在继续只调起跳速度之前，控制器又做了一轮 landing 链路迭代，主要加入了：
+landing-support 这一轮改动仍然是当前控制栈的重要基础，但仓库里目前最好的方向，
+已经不是单独继续调 landing，而是把下面三件事组合起来：
 
-- landing 和 recovery 之间连续的 support-hold 姿态
-- `support_hold_forward_gain_m` 与 `release_to_complete_forward_gain_m`
-- 可连续调节的 touchdown reference blend
+- 保留 touchdown-aware 的 landing support 路线
+- 把 `push` 和 `flight` 的俯仰目标调得更抬头
+- 显式调 `push` 与 `flight` 的前后腿 compactness 形状
 
-当前默认参考方向是：
+复现当前实验参考组的最短命令是：
 
-- `takeoff_angle_deg = 35.0`
-- `landing_support_blend = 0.40`
+```bash
+./scripts/run_airborne_priority_trial.sh 0.25
+```
+
+这个脚本当前会设置：
+
+- `takeoff_speed_scale = 1.04`
+- `push_front_tau_scale = 1.04`
+- `push_rear_tau_scale = 1.04`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
+- `push_front_compact_delta_rad = -0.155`
+- `push_rear_compact_delta_rad = 0.055`
+- `flight_front_compact_delta_rad = 0.24`
+- `flight_rear_compact_delta_rad = -0.14`
+- `landing_support_blend = 0.30`
 - `landing_touchdown_reference_blend = 0.80`
 
-2026 年 3 月 25 日最新几次默认 `0.25 m` 试验得到的大致结果是：
+2026 年 3 月 25 日重复验证
+(`reports/jump_metrics/trial_20260325_222842.txt` 与
+`reports/jump_metrics/trial_20260325_222913.txt`) 的结果大致是：
 
-- `final_forward_displacement_m ~= 0.33-0.35`
-- `airborne_forward_progress_m ~= 0.11`
-- `post_landing_forward_gain_m ~= 0.23`
-- `support_hold_forward_gain_m ~= 0.17`
-- `release_to_complete_forward_gain_m ~= 0.06`
-- `final_pitch_deg ~= -28`
+- `final_forward_displacement_m ~= 0.253-0.255`
+- `airborne_forward_progress_m ~= 0.163-0.165`
+- `post_landing_forward_gain_m ~= 0.060-0.063`
+- `landing_pitch_deg ~= -46.7 到 -48.0`
+- `final_pitch_deg ~= -39.4 到 -39.6`
 
-这组默认值比旧 landing 路线更接近真正的前跳，因为它明显压低了“落地后补出来的
-假增益”。但它仍然没有达到“绝大部分位移都靠腾空完成”的最终目标。
+这已经是仓库里目前最接近目标的折中点了。它还没有彻底解决 touchdown 姿态问题，
+但相较旧基线，绝大部分前移已经更多地在腾空阶段完成，落地后的补位也被明显压低。
 
-还有一组更激进的 landing-support 探针值得保留：
+如果当前优先级是“姿态更自然”，还有一组邻近参考值值得保留：
 
-- `GO2_JUMP_LANDING_HOLD_USE_TOUCHDOWN_POSE=true`
-- `GO2_JUMP_LANDING_SUPPORT_BLEND=0.40`
+- `push_front_compact_delta_rad = -0.15`
+- `push_rear_compact_delta_rad = 0.06`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
 
-这一组大致得到：
+这组结果通常是：
 
-- `final_forward_displacement_m ~= 0.3030`
-- `airborne_forward_progress_m ~= 0.1054`
-- `post_landing_forward_gain_m ~= 0.1974`
-- `final_pitch_deg ~= -34.7`
-
-它的意义在于证明“更强地贴近 touchdown 姿态”确实可以继续压低落地后补位，但当前
-机身姿态仍然不够好，暂时还不适合作为默认值。
+- `final_forward_displacement_m ~= 0.234-0.244`
+- `airborne_forward_progress_m ~= 0.158-0.160`
+- `post_landing_forward_gain_m ~= 0.047-0.056`
+- `landing_pitch_deg ~= -44.9 到 -45.3`
 
 ## 当前限制
 
@@ -291,18 +306,22 @@ GO2_JUMP_LANDING_TOUCHDOWN_REFERENCE_BLEND=0.80 \
 
 ## 当前最推荐的下一组实验
 
-下一步最值得做的，已经是沿着 touchdown-aware landing 路线继续搜索更干净的前跳
-折中点。目标是：
+下一步最值得做的，不是继续大范围扫 `takeoff_speed_scale`，而是围绕当前
+airborne-first 参考组继续把 touchdown 做干净。目标是：
 
 - 保住较高的 `airborne_forward_progress_m`
-- 明显压低 `post_landing_forward_gain_m`
-- 同时保持 touchdown 后的机身稳定
+- 继续压低 `post_landing_forward_gain_m`
+- 同时让 touchdown 时的机身俯仰更自然
 
 最短命令路径就是：
 
 ```bash
-GO2_JUMP_TAKEOFF_ANGLE_DEG=35.0 \
-GO2_JUMP_LANDING_SUPPORT_BLEND=0.40 \
-GO2_JUMP_LANDING_TOUCHDOWN_REFERENCE_BLEND=0.80 \
-./scripts/docker_run_single_jump_trial.sh 0.25
+./scripts/run_airborne_priority_trial.sh 0.25
 ```
+
+最值得继续推进的两个技术方向是：
+
+- 继续细调 `push_front_compact_delta_rad` / `push_rear_compact_delta_rad`
+  在 `-0.155 / 0.055` 附近的小范围变化
+- 单独加入一个飞行末段的姿态整形路径，在不提前切 landing pose 的前提下改善
+  touchdown 姿态

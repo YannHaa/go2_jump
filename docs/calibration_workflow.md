@@ -244,49 +244,64 @@ Key takeaways from that sweep:
 - an experimental touchdown-hold landing branch can suppress post-landing gain, but
   it is currently too unstable to become the default
 
-### Landing-Support Iteration on March 25, 2026
+### Airborne-First Reference on March 25, 2026
 
-The next controller iteration focused on the landing chain instead of further
-takeoff-speed-only sweeps. It added:
+The landing-support iteration is still important, but the current best direction
+is no longer a landing-only tweak. The stronger result came from combining:
 
-- a continuous support-hold pose between landing and recovery
-- `support_hold_forward_gain_m` and `release_to_complete_forward_gain_m`
-- a tunable touchdown-reference blend for landing support
+- the same touchdown-aware landing support path
+- more upright `push` and `flight` pitch targets
+- explicit `push` and `flight` compactness-shape tuning
 
-The current default reference direction is:
+The fastest way to reproduce the current experimental reference is:
 
-- `takeoff_angle_deg = 35.0`
-- `landing_support_blend = 0.40`
+```bash
+./scripts/run_airborne_priority_trial.sh 0.25
+```
+
+The script currently applies:
+
+- `takeoff_speed_scale = 1.04`
+- `push_front_tau_scale = 1.04`
+- `push_rear_tau_scale = 1.04`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
+- `push_front_compact_delta_rad = -0.155`
+- `push_rear_compact_delta_rad = 0.055`
+- `flight_front_compact_delta_rad = 0.24`
+- `flight_rear_compact_delta_rad = -0.14`
+- `landing_support_blend = 0.30`
 - `landing_touchdown_reference_blend = 0.80`
 
-The latest default `0.25 m` runs on March 25, 2026 reported approximately:
+Repeated `0.25 m` validations on March 25, 2026
+(`reports/jump_metrics/trial_20260325_222842.txt` and
+`reports/jump_metrics/trial_20260325_222913.txt`) reported approximately:
 
-- `final_forward_displacement_m ~= 0.33-0.35`
-- `airborne_forward_progress_m ~= 0.11`
-- `post_landing_forward_gain_m ~= 0.23`
-- `support_hold_forward_gain_m ~= 0.17`
-- `release_to_complete_forward_gain_m ~= 0.06`
-- `final_pitch_deg ~= -28`
+- `final_forward_displacement_m ~= 0.253-0.255`
+- `airborne_forward_progress_m ~= 0.163-0.165`
+- `post_landing_forward_gain_m ~= 0.060-0.063`
+- `landing_pitch_deg ~= -46.7 to -48.0`
+- `final_pitch_deg ~= -39.4 to -39.6`
 
-This is a better forward-jump default than the older landing path because it
-reduces fake post-landing gains materially. It still does not satisfy the final
-project goal of completing most of the commanded distance in flight.
+This is the current best near-target compromise in the repository. It does not
+fully solve touchdown posture, but it is much closer to the intended behavior:
+most of the motion is now completed in flight and the post-landing catch-up is
+kept comparatively small.
 
-One more aggressive landing-support probe is worth keeping as a reference:
+One nearby variant is worth keeping in mind when the priority is a cleaner body
+shape over exact distance:
 
-- `GO2_JUMP_LANDING_HOLD_USE_TOUCHDOWN_POSE=true`
-- `GO2_JUMP_LANDING_SUPPORT_BLEND=0.40`
+- `push_front_compact_delta_rad = -0.15`
+- `push_rear_compact_delta_rad = 0.06`
+- `push_pitch_target_deg = 8.0`
+- `flight_pitch_target_deg = 6.0`
 
-That combination reached roughly:
+That variant typically landed around:
 
-- `final_forward_displacement_m ~= 0.3030`
-- `airborne_forward_progress_m ~= 0.1054`
-- `post_landing_forward_gain_m ~= 0.1974`
-- `final_pitch_deg ~= -34.7`
-
-It is useful diagnostically because it shows that touchdown-biased support can
-reduce post-landing motion substantially, but the body attitude is still too poor
-for default use.
+- `final_forward_displacement_m ~= 0.234-0.244`
+- `airborne_forward_progress_m ~= 0.158-0.160`
+- `post_landing_forward_gain_m ~= 0.047-0.056`
+- `landing_pitch_deg ~= -44.9 to -45.3`
 
 ## Current Limitations
 
@@ -297,18 +312,22 @@ for default use.
 
 ## Recommended Next Experiment
 
-The next useful experiment is now to keep the touchdown-aware landing path and
-search for a cleaner forward-jump compromise so that:
+The next useful experiment is now to keep the current airborne-first reference and
+search for a cleaner touchdown so that:
 
 - `airborne_forward_progress_m` stays high
-- `post_landing_forward_gain_m` drops materially
-- the robot remains stable after touchdown
+- `post_landing_forward_gain_m` drops further
+- the robot lands with a more natural pitch attitude
 
 The shortest path is:
 
 ```bash
-GO2_JUMP_TAKEOFF_ANGLE_DEG=35.0 \
-GO2_JUMP_LANDING_SUPPORT_BLEND=0.40 \
-GO2_JUMP_LANDING_TOUCHDOWN_REFERENCE_BLEND=0.80 \
-./scripts/docker_run_single_jump_trial.sh 0.25
+./scripts/run_airborne_priority_trial.sh 0.25
 ```
+
+The next technical step is not another large takeoff-speed sweep. It is either:
+
+- finer `push_front_compact_delta_rad` / `push_rear_compact_delta_rad` refinement
+  around `-0.155 / 0.055`
+- or a dedicated descent-attitude shaping path that improves touchdown posture
+  without reintroducing early landing-pose blending
