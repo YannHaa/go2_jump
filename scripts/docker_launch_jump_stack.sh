@@ -8,6 +8,7 @@ source "${ROOT_DIR}/scripts/jump_launch_args.sh"
 
 build_jump_launch_args "${TARGET_DISTANCE_M}" LAUNCH_ARGS
 
+echo "Jump profile: ${GO2_JUMP_EFFECTIVE_PROFILE:-config_default}"
 echo "Launching jump stack with arguments: ${LAUNCH_ARGS[*]}"
 
 docker run --rm --net host \

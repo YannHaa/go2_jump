@@ -25,9 +25,9 @@
 如果你是第一次接触这个项目，建议按下面顺序阅读和操作：
 
 1. 先读本文件，完成第一次构建和第一次单次试验。
-2. 再读 [控制链路说明](docs/control_stack.md)，理解运行时数据怎么流动。
-3. 接着读 [调参流程](docs/calibration_workflow.md)，理解怎么读报告、怎么做 sweep。
-4. 如果准备改代码或改依赖，再读 [开发流程](docs/development_workflow.md)。
+2. 再读 [控制链路说明](docs/control_stack.zh-CN.md)，理解运行时数据怎么流动。
+3. 接着读 [调参流程](docs/calibration_workflow.zh-CN.md)，理解怎么读报告、怎么做 sweep。
+4. 如果准备改代码或改依赖，再读 [开发流程](docs/development_workflow.zh-CN.md)。
 
 ## 项目范围
 
@@ -155,7 +155,7 @@ cd /home/hayan/go2_jump_ws
 - 等待 `/lowstate` 稳定
 - 启动 planner 和 controller
 - 等待新的试验报告生成
-- 归档日志和报告
+- 归档日志、报告和试验上下文
 - 关闭运行时容器
 
 ## 两种标准验证方式
@@ -204,6 +204,30 @@ cd /home/hayan/go2_jump_ws
 
 ## 调参入口
 
+### 0. 切换命名参数档位
+
+当前仓库支持用 `GO2_JUMP_PROFILE` 选择一组命名参数档位。
+
+例如，显式使用当前默认风格的保守档：
+
+```bash
+GO2_JUMP_PROFILE=conservative_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+切到更激进的空中探索档：
+
+```bash
+GO2_JUMP_PROFILE=aggressive_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+当前内置档位包括：
+
+- `config_default`
+- `conservative_airborne`
+- `aggressive_airborne`
+
 ### 1. 标定起跳速度
 
 ```bash
@@ -211,6 +235,15 @@ cd /home/hayan/go2_jump_ws
 ```
 
 这个 sweep 解决的是“给定目标距离，起跳速度应该放大多少”。
+
+如果你已经切到某个命名档位，想在保留该档位姿态/力矩特征的同时重新标定
+`takeoff_speed_scale`，可以直接使用：
+
+```bash
+./scripts/sweep_profile_takeoff_speed_scale.sh aggressive_airborne 0.25 0.94,0.97,1.00,1.03 1
+```
+
+这个脚本特别适合处理“空中前移明显增强，但最终位移超了”的情况。
 
 ### 2. 优化空中前移能力
 
@@ -259,6 +292,17 @@ cd /home/hayan/go2_jump_ws
 
 这组参数可以把 `airborne_forward_progress_m` 提高到约 `0.0655 m`，但最终位移会超到约 `0.306 m`，因此更适合作为探索模式，而不是默认设置。
 
+### 当前已验证的一组激进档重标点
+
+2026 年 3 月 25 日做过一次单点验证，保留激进空中探索档，同时把
+`takeoff_speed_scale` 降到 `1.00`，得到：
+
+- `final_forward_displacement_m ~= 0.2593`
+- `airborne_forward_progress_m ~= 0.0527`
+
+这说明“保留激进档姿态整形，再单独把起跳速度往下拉”这条路线是有效的。它还不
+足以直接升级成默认值，但已经是下一轮重复试验的好起点。
+
 ## 当前局限
 
 - `foot_force_est` 仍然为零，因此落地检测仍是启发式的
@@ -269,6 +313,9 @@ cd /home/hayan/go2_jump_ws
 ## 文档索引
 
 - [English README](README.md)
-- [控制链路说明](docs/control_stack.md)
-- [调参流程](docs/calibration_workflow.md)
-- [开发流程](docs/development_workflow.md)
+- [Control Stack](docs/control_stack.md)
+- [控制链路说明](docs/control_stack.zh-CN.md)
+- [Calibration Workflow](docs/calibration_workflow.md)
+- [调参流程](docs/calibration_workflow.zh-CN.md)
+- [Development Workflow](docs/development_workflow.md)
+- [开发流程](docs/development_workflow.zh-CN.md)

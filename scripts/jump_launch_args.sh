@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/scripts/jump_profiles.sh"
+
 append_optional_launch_arg() {
   local array_name="$1"
   local launch_name="$2"
@@ -16,6 +19,7 @@ build_jump_launch_args() {
   local array_name="$2"
   local -n launch_args_array="${array_name}"
 
+  apply_jump_profile_defaults
   launch_args_array=("target_distance_m:=${target_distance_m}")
 
   append_optional_launch_arg "${array_name}" "takeoff_angle_deg" \

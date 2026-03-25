@@ -1,5 +1,7 @@
 # Development Workflow
 
+[中文](development_workflow.zh-CN.md)
+
 ## Purpose
 
 This document describes how the repository is structured and how to update it
@@ -87,6 +89,18 @@ Check:
 - `final_forward_displacement_m`
 - `max_abs_pitch_deg`
 - `max_joint_tracking_error_rad`
+
+### Adjust or Add a Jump Profile
+
+Named experiment profiles are stored in:
+
+- `scripts/jump_profiles.sh`
+
+When adding a new profile:
+
+1. keep the change limited to environment-backed launch overrides
+2. document the intended use in `README.md` and `docs/calibration_workflow.md`
+3. validate with at least one single-trial run before treating it as reusable
 
 ## Updating a Submodule
 

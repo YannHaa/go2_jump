@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/scripts/jump_profiles.sh"
 DISTANCES_CSV="${1:-${GO2_JUMP_SWEEP_DISTANCES:-0.15,0.20,0.25,0.30}}"
 SCALES_CSV="${2:-${GO2_JUMP_SWEEP_SCALES:-1.00,1.03,1.06,1.09}}"
 TRIALS_PER_SETTING="${3:-${GO2_JUMP_SWEEP_TRIALS:-1}}"
@@ -12,6 +13,8 @@ RAW_CSV_PATH="${OUT_DIR}/speed_scale_sweep_${TIMESTAMP}.csv"
 SUMMARY_PATH="${OUT_DIR}/speed_scale_sweep_${TIMESTAMP}_summary.txt"
 
 mkdir -p "${OUT_DIR}"
+apply_jump_profile_defaults
+ACTIVE_PROFILE="${GO2_JUMP_EFFECTIVE_PROFILE:-config_default}"
 
 extract_metric() {
   local key="$1"
@@ -58,6 +61,7 @@ done
 
 {
   echo "Raw sweep data: ${RAW_CSV_PATH}"
+  echo "Jump profile: ${ACTIVE_PROFILE}"
   echo
   echo "Averages by target distance and takeoff speed scale:"
   awk -F, '

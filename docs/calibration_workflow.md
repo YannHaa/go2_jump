@@ -1,5 +1,7 @@
 # Calibration Workflow
 
+[中文](calibration_workflow.zh-CN.md)
+
 ## Purpose
 
 This document explains how to tune the jump stack in a repeatable way.
@@ -29,7 +31,22 @@ cd /home/hayan/go2_jump_ws
 
 This gives you a reference report for the current default configuration.
 
-### Step 2: Fit the Takeoff-Speed Curve
+### Step 2: Select a Working Profile
+
+If you want to compare controller behavior systematically, select a named profile
+before starting a sweep.
+
+```bash
+GO2_JUMP_PROFILE=conservative_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+```bash
+GO2_JUMP_PROFILE=aggressive_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+### Step 3: Fit the Takeoff-Speed Curve
 
 ```bash
 ./scripts/sweep_takeoff_speed_scale.sh 0.20,0.25,0.30 1.00,1.03,1.06 1
@@ -42,7 +59,7 @@ The sweep writes:
 - a raw CSV under `reports/calibration/`
 - a summary file under `reports/calibration/`
 
-### Step 3: Improve Airborne Motion
+### Step 4: Improve Airborne Motion
 
 ```bash
 ./scripts/sweep_airborne_push_pitch.sh 0.25 0.88,0.92,0.96 1.08,1.12,1.16 -8.0,-5.0,-2.0 -2.0,0.0 1
@@ -57,6 +74,17 @@ This script compares:
 - flight-phase pitch target
 
 and ranks the results by airborne performance and final-distance error.
+
+### Step 5: Re-Fit Takeoff Speed for a Stronger Profile
+
+When a profile improves airborne motion but overshoots the final distance, keep the
+profile and retune only `takeoff_speed_scale`.
+
+```bash
+./scripts/sweep_profile_takeoff_speed_scale.sh aggressive_airborne 0.25 0.94,0.97,1.00,1.03 1
+```
+
+This is the recommended follow-up after the current aggressive airborne probe.
 
 ## Fast Command Reference
 
@@ -78,6 +106,13 @@ and ranks the results by airborne performance and final-distance error.
 GO2_JUMP_USE_TAKEOFF_SPEED_SCALE_CURVE=false \
 GO2_JUMP_TAKEOFF_SPEED_SCALE=1.09 \
 ./scripts/docker_run_single_jump_trial.sh 0.20
+```
+
+### Run with a Named Profile
+
+```bash
+GO2_JUMP_PROFILE=aggressive_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
 ```
 
 ### Manual Push / Pitch Override
@@ -159,6 +194,22 @@ Two settings are especially useful as references at `0.25 m`:
 The conservative setting is the current default because it improves airborne
 progress while keeping the final displacement near the target.
 
+### First Retuned Aggressive Check on March 25, 2026
+
+The first single-point re-fit of the aggressive airborne profile used:
+
+- `GO2_JUMP_PROFILE=aggressive_airborne`
+- `GO2_JUMP_USE_TAKEOFF_SPEED_SCALE_CURVE=false`
+- `GO2_JUMP_TAKEOFF_SPEED_SCALE=1.00`
+
+Result from the one-shot validation:
+
+- `final_forward_displacement_m ~= 0.2593`
+- `airborne_forward_progress_m ~= 0.0527`
+
+This is not yet a promoted default, but it confirms that the aggressive posture
+shape can be retained while pulling final distance back toward the target.
+
 ## Current Limitations
 
 - `foot_force_est` is still zero in the present MuJoCo bridge path
@@ -173,3 +224,9 @@ The next useful experiment is to keep the aggressive airborne mode and retune
 
 - `airborne_forward_progress_m` stays high
 - final displacement returns closer to the `0.25 m` target
+
+The shortest path is:
+
+```bash
+./scripts/sweep_profile_takeoff_speed_scale.sh aggressive_airborne 0.25 0.94,0.97,1.00,1.03 1
+```

@@ -8,6 +8,7 @@ TRIAL_TIMEOUT_S="${GO2_JUMP_TRIAL_TIMEOUT_S:-15}"
 LOWSTATE_WAIT_S="${GO2_JUMP_LOWSTATE_WAIT_S:-10}"
 REPORT_DIR="${ROOT_DIR}/reports/jump_metrics"
 REPORT_PATH="${REPORT_DIR}/latest_report.txt"
+CONTEXT_PATH="${REPORT_DIR}/latest_trial_context.txt"
 SIM_LOG_PATH="${REPORT_DIR}/latest_sim.log"
 STACK_LOG_PATH="${REPORT_DIR}/latest_stack.log"
 TRIAL_TAG="go2_jump_trial_$(date +%Y%m%d_%H%M%S)_$$"
@@ -18,7 +19,15 @@ source "${ROOT_DIR}/scripts/jump_launch_args.sh"
 build_jump_launch_args "${TARGET_DISTANCE_M}" LAUNCH_ARGS
 
 mkdir -p "${REPORT_DIR}"
-rm -f "${REPORT_PATH}" "${SIM_LOG_PATH}" "${STACK_LOG_PATH}"
+rm -f "${REPORT_PATH}" "${CONTEXT_PATH}" "${SIM_LOG_PATH}" "${STACK_LOG_PATH}"
+
+{
+  echo "target_distance_m: ${TARGET_DISTANCE_M}"
+  echo "jump_profile: ${GO2_JUMP_EFFECTIVE_PROFILE:-config_default}"
+  for launch_arg in "${LAUNCH_ARGS[@]}"; do
+    echo "launch_arg: ${launch_arg}"
+  done
+} > "${CONTEXT_PATH}"
 
 STALE_CONTAINER_IDS="$(docker ps -aq \
   --filter label=go2_jump.project=go2_jump_ws \
@@ -127,6 +136,7 @@ if [ "${LOWSTATE_WAIT_EXIT}" -ne 0 ]; then
 fi
 
 echo "MuJoCo bridge is publishing steady /lowstate. Running trial at ${TARGET_DISTANCE_M} m."
+echo "Jump profile: ${GO2_JUMP_EFFECTIVE_PROFILE:-config_default}"
 echo "Launch overrides: ${LAUNCH_ARGS[*]}"
 
 STACK_CONTAINER_ID="$(
@@ -188,8 +198,11 @@ fi
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 ARCHIVE_PATH="${REPORT_DIR}/trial_${TIMESTAMP}.txt"
+ARCHIVE_CONTEXT_PATH="${REPORT_DIR}/trial_${TIMESTAMP}_context.txt"
 cp "${REPORT_PATH}" "${ARCHIVE_PATH}"
+cp "${CONTEXT_PATH}" "${ARCHIVE_CONTEXT_PATH}"
 
 echo
 echo "Archived trial report: ${ARCHIVE_PATH}"
+echo "Archived trial context: ${ARCHIVE_CONTEXT_PATH}"
 cat "${REPORT_PATH}"

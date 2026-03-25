@@ -145,7 +145,8 @@ cd /home/hayan/go2_jump_ws
 ```
 
 This helper starts a fresh simulator, runs the planner and controller, waits for a
-new report, archives the result, and shuts the runtime containers down cleanly.
+new report, archives the result and the launch context, and shuts the runtime
+containers down cleanly.
 
 ## Standard Validation Commands
 
@@ -192,6 +193,30 @@ inflated by post-landing recovery motion.
 
 ## Tuning Workflow
 
+### Switch Jump Profiles
+
+The workspace supports named parameter profiles through `GO2_JUMP_PROFILE`.
+
+Use the current default-style profile explicitly:
+
+```bash
+GO2_JUMP_PROFILE=conservative_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+Probe the stronger airborne setting:
+
+```bash
+GO2_JUMP_PROFILE=aggressive_airborne \
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+The supported profiles are currently:
+
+- `config_default`
+- `conservative_airborne`
+- `aggressive_airborne`
+
 ### Calibrate Takeoff Speed
 
 ```bash
@@ -199,6 +224,15 @@ inflated by post-landing recovery motion.
 ```
 
 Use this sweep to fit the `takeoff_speed_scale` curve for target-distance accuracy.
+
+To recalibrate takeoff speed for a named profile, use:
+
+```bash
+./scripts/sweep_profile_takeoff_speed_scale.sh aggressive_airborne 0.25 0.94,0.97,1.00,1.03 1
+```
+
+This keeps the aggressive airborne posture shaping while searching for a lower
+`takeoff_speed_scale` that brings the final distance back toward the target.
 
 ### Optimize Airborne Motion
 
@@ -249,6 +283,17 @@ This setting increased `airborne_forward_progress_m` to approximately `0.0655 m`
 the March 25, 2026 sweep, but it also pushed the final displacement to roughly
 `0.306 m`. It is best treated as an exploration mode rather than the default.
 
+### First Retuned Aggressive Reference
+
+A single validation run on March 25, 2026 kept the aggressive airborne profile and
+reduced `takeoff_speed_scale` to `1.00`:
+
+- `final_forward_displacement_m ~= 0.2593`
+- `airborne_forward_progress_m ~= 0.0527`
+
+This is a useful next candidate when the goal is to keep a stronger airborne motion
+without overshooting the `0.25 m` target as badly as the untuned aggressive setup.
+
 ## Current Known Limitations
 
 - `foot_force_est` is still zero in the present MuJoCo bridge path, so touchdown
@@ -262,5 +307,8 @@ the March 25, 2026 sweep, but it also pushed the final displacement to roughly
 
 - [中文文档](README.zh-CN.md)
 - [Control Stack](docs/control_stack.md)
+- [控制链路说明](docs/control_stack.zh-CN.md)
 - [Calibration Workflow](docs/calibration_workflow.md)
+- [调参流程](docs/calibration_workflow.zh-CN.md)
 - [Development Workflow](docs/development_workflow.md)
+- [开发流程](docs/development_workflow.zh-CN.md)
