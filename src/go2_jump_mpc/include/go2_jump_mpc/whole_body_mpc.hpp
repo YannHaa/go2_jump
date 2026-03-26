@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,11 +17,13 @@ struct RobotObservation {
   bool sportstate_received{false};
   std::array<double, kControlledJointCount> q{};
   std::array<double, kControlledJointCount> dq{};
+  std::array<double, 4> raw_foot_force_est{};
   std::array<double, 4> foot_force_est{};
   std::array<bool, 4> foot_contact{};
   bool contact_signal_valid{false};
   std::array<double, 3> body_rpy{};
   std::array<double, 3> body_velocity{};
+  std::array<double, 3> body_angular_velocity{};
   std::array<double, 3> position{};
 };
 
@@ -72,11 +75,18 @@ struct WholeBodyMpcConfig {
   double settle_kp{45.0};
   double settle_kd{5.0};
   double max_feedforward_torque_nm{18.0};
-  double contact_force_threshold_n{12.0};
+  double contact_force_threshold_n{8.0};
+  double contact_release_threshold_n{3.0};
+  double contact_filter_alpha{0.35};
+  int contact_stable_cycles{2};
+  double min_contact_signal_force_n{1.0};
   int flight_contact_count_max{1};
   int touchdown_contact_count_threshold{2};
   double min_flight_time_before_touchdown_s{0.03};
   double settle_vertical_velocity_threshold_mps{0.20};
+  std::string mujoco_model_path{};
+  int mujoco_rollout_steps{18};
+  int mujoco_rollout_substeps{2};
 
   go2_jump_core::JumpTaskConfig reference_config{};
 
@@ -109,14 +119,21 @@ struct WholeBodyMpcConfig {
 class WholeBodyMpc {
  public:
   explicit WholeBodyMpc(WholeBodyMpcConfig config);
+  ~WholeBodyMpc();
 
   void SetTask(const go2_jump_core::JumpTaskSpec& task);
   bool HasTask() const;
 
   WholeBodyMpcCommand Solve(const RobotObservation& observation,
-                            double task_elapsed_s) const;
+                            double task_elapsed_s);
 
  private:
+  struct MujocoBackend;
+
+  WholeBodyMpcCommand SolveReferencePreview(const RobotObservation& observation,
+                                            double task_elapsed_s) const;
+  WholeBodyMpcCommand SolveMujocoSampling(const RobotObservation& observation,
+                                          double task_elapsed_s);
   std::array<double, kControlledJointCount> BuildPoseForSample(
       const go2_jump_core::JumpReferenceSample& sample) const;
   std::array<double, kControlledJointCount> BuildFeedforwardForSample(
@@ -127,10 +144,17 @@ class WholeBodyMpc {
       const go2_jump_core::JumpReferenceSample& planned_sample,
       const RobotObservation& observation,
       double task_elapsed_s) const;
+  go2_jump_core::JumpReferenceSample ApplyContactOverrides(
+      const go2_jump_core::JumpReferenceSample& planned_sample,
+      int contact_count,
+      bool contact_signal_valid,
+      double body_vertical_velocity_mps,
+      double task_elapsed_s) const;
 
   WholeBodyMpcConfig config_;
   go2_jump_core::JumpTaskSpec task_{};
   bool have_task_{false};
+  std::unique_ptr<MujocoBackend> mujoco_backend_;
 };
 
 }  // namespace go2_jump_mpc

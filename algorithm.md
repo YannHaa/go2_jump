@@ -2,140 +2,186 @@
 
 [中文版本](algorithm.zh-CN.md)
 
-This repository is being rebuilt around a three-layer jump-control stack:
+This project is organized as a three-layer control stack:
 
-`planner -> controller -> WBC/MPC backend -> LowCmd`
+`planner -> controller -> MuJoCo-native WBC/MPC backend -> LowCmd`
 
-The purpose of this document is to clarify what each layer computes, what is
-already implemented in the repository, and what still needs to be replaced by
-the final MuJoCo-native optimizer.
+The purpose of this document is to state, in engineering terms, what each layer
+computes today and what still needs to improve before the stack becomes a
+high-quality forward jump controller.
 
 ## 1. Planner
 
-The planner answers one question:
+The planner converts a distance request into a jump task.
 
-given a target forward distance, what kind of takeoff and landing event should
-the robot try to realize?
+Current implementation: `go2_jump_core`
 
-The current planner lives in `go2_jump_core` and computes:
+Inputs:
 
-- target takeoff speed from a ballistic approximation
-- decomposition of takeoff velocity into forward and vertical components
-- nominal phase timing for crouch, push, flight, landing, and settle
-- body-level reference quantities used by the controller preview
+- target jump distance
+- takeoff angle
+- optional takeoff-speed scaling
+- desired takeoff and landing body pitch
 
-The current planner does not solve a full centroidal optimization problem yet.
-It provides a clean task interface that can later feed:
+Outputs:
 
-- a centroidal jump planner
-- a MuJoCo rollout optimizer
-- a published baseline controller for comparison
+- takeoff speed from a ballistic approximation
+- forward and vertical takeoff velocity components
+- estimated crouch / push / flight / landing / settle durations
+- phase-level reference quantities:
+  - desired forward velocity
+  - desired vertical velocity
+  - desired body pitch
+  - desired body height offset
+  - leg retraction ratio
+  - landing brace factor
 
-In practical terms, the planner should remain the stable layer that maps:
+What the planner is not doing yet:
+
+- no centroidal optimization
+- no explicit contact schedule search
+- no terrain-aware timing
+- no optimization over landing footprint
+
+Why this layer still matters:
+
+The planner keeps the task interface stable. As the backend changes from preview
+control to native MPC, the upper-level contract remains:
 
 `distance request -> jump task specification`
 
 ## 2. Controller
 
-The controller answers the next question:
+The controller translates the active jump task and the current observation into
+the next low-level command.
 
-given the current robot observation and the active jump task, what should the
-robot try to do in the next few control steps?
+Current implementation: `go2_jump_mpc`
 
-The current controller lives in `go2_jump_mpc` and already performs four useful
-jobs:
+### 2.1 Observation processing
 
-- receives `JumpTask` and builds a short horizon preview
-- converts phase-level references into joint-space reference poses
-- generates a `LowCmd` command stream at control rate
-- uses contact observation to override phase timing when the measured contact
-  sequence disagrees with the nominal schedule
+The controller reads:
 
-That last point matters. A jump controller cannot rely on time alone. The
-actual contact sequence may deviate because of:
+- joint position and velocity from `/lowstate`
+- IMU orientation and angular velocity from `/lowstate`
+- body position and linear velocity from `/sportmodestate`
+- foot contact proxy from `/lowstate.foot_force_est`
 
-- earlier-than-expected liftoff
-- earlier-than-expected touchdown
-- asymmetric or partial landing contact
+The contact path now has three stages:
 
-For that reason the current controller already contains a minimal contact-aware
-phase manager:
+1. `unitree_mujoco` reconstructs support loads from MuJoCo contact forces.
+2. `go2_jump_mpc_node` filters those loads and applies hysteresis / debounce.
+3. The controller derives boolean foot contact and contact-count signals from the filtered loads.
 
-- if support contact disappears early during push, the controller can switch to
-  flight early
-- if contact reappears during nominal flight, the controller can switch to
-  landing early
-- once touchdown is stable and vertical motion is small, the controller can
-  switch to settle
+This matters because jump phase transitions are extremely sensitive to noisy
+contact measurements. A raw threshold on a weak or delayed proxy is not enough.
 
-To avoid false overrides, the controller only enables those contact-based phase
-changes after it has seen a non-trivial contact signal from the observation
-stream.
+### 2.2 Phase management
 
-This is still a preview controller, not the final optimizer, but it gives the
-project an observation-driven closed loop instead of a pure open-loop script.
+The controller does not rely on time alone.
 
-## 3. WBC / MPC Backend
+It starts from the nominal phase given by `SampleJumpReference`, then applies
+contact-driven overrides such as:
 
-The backend answers the final question:
+- early takeoff detection
+- delayed push extension when nominal flight starts but stance contact is still present
+- delayed landing when the nominal landing window starts but the robot is still airborne
+- early touchdown detection
+- settle transition after touchdown is stable and vertical motion is small
 
-how should the low-level command be computed so the robot respects dynamics,
-contact, torque limits, and task priorities at the same time?
+The practical goal is simple:
 
-In the final target architecture, this layer will be a MuJoCo-native whole-body
-optimization backend. It should solve for:
+make the executed phase track the real contact sequence, not only the nominal clock.
 
-- joint torques or torque-consistent low-level commands
-- contact-consistent whole-body motion
-- takeoff impulse quality
-- body pitch and landing posture regulation
-- post-touchdown stabilization
+### 2.3 Command synthesis
 
-The intended backend structure is:
+For the current control tick, the controller builds:
 
-1. Roll out dynamics over a short horizon.
-2. Penalize deviation from jump-task objectives.
-3. Penalize excessive torque, joint velocity, and pose excursions.
-4. Use contact-aware constraints or soft penalties through takeoff and landing.
-5. Apply the first command of the horizon and repeat.
+- joint-space reference pose `q_ref`
+- zero or near-zero `dq_ref`
+- phase-dependent PD gains
+- phase-dependent feedforward torques
 
-The current repository does not contain that final solver yet. Today, the
-backend is a `reference_preview` scaffold that keeps the outer ROS 2 interface
-stable while the solver is rebuilt.
+The feedforward term is still simple. It is not a full rigid-body inverse
+dynamics solve. It is a structured low-level bias that gives the push and
+landing phases more authority than a pure pose tracker.
 
-## Current Implementation Status
+## 3. MuJoCo-native WBC / MPC Backend
 
-What is implemented now:
+The backend chooses the action that should be applied now, subject to dynamics
+and contact behavior over a short horizon.
 
-- task-level jump specification
-- reference preview generation
-- contact-aware phase override logic
-- `LowCmd` publication path
-- `JumpControllerState` diagnostic topic
-- reproducible simulator + ROS 2 smoke-test path
+Current implementation: `mujoco_native_mpc`
 
-What is not implemented yet:
+This backend is not a textbook QP-WBC yet. It is a native MuJoCo rollout MPC
+backbone:
 
-- centroidal jump optimizer
-- torque-level whole-body QP
-- MuJoCo-native shooting or SQP backend
-- reactive landing redistribution across feet
-- identification-backed model calibration
+1. Reconstruct a MuJoCo state from the current observation.
+2. Sample a small set of candidate action modifiers.
+3. Roll each candidate forward inside MuJoCo for a short horizon.
+4. Score the rollout against phase objectives, contact behavior, pitch, and terminal velocity.
+5. Take the best candidate and apply its first-step action on the real control path.
 
-## Recommended Next Solver Upgrade
+### 3.1 What is optimized today
 
-The next useful upgrade is not “more joint-space tuning”. It is replacing the
-preview backend with a backend that explicitly reasons about:
+The rollout cost currently reasons about:
 
-- centroidal momentum
-- contact schedule hypotheses
-- joint and torque constraints
-- touchdown cost and post-touchdown recovery
+- desired forward velocity
+- desired vertical velocity
+- body pitch and roll
+- contact count consistency with crouch / push / flight / landing / settle
+- forward displacement over the short horizon
+- control effort
 
-That will let the repository move from:
+The candidate action lattice perturbs:
 
-`task-conditioned motion script`
+- push extension strength
+- body pitch bias
+- flight tuck amount
+- landing brace amount
 
-to:
+### 3.2 What this backend already solves
 
-`task-conditioned optimization controller`
+Compared with the preview-only baseline, the native backend already does three
+important things:
+
+- it evaluates actions in the same MuJoCo model used for simulation
+- it reasons about short-horizon consequences instead of only the current phase pose
+- it shares the same low-level `LowCmd` execution path as the rest of the stack
+
+### 3.3 What is still missing
+
+This backend is not finished. The main remaining gaps are:
+
+- takeoff timing is still not clean enough
+- predicted phase and real contact can still drift apart
+- no explicit centroidal momentum state
+- no contact-force optimization variable
+- no full-body QP with torque-consistent task priorities
+- no reactive landing redistribution across individual feet
+
+So the backend is already real, but still early.
+
+## 4. How the Three Layers Work Together
+
+At each control tick:
+
+1. The planner provides the nominal jump task and phase reference.
+2. The controller aligns that reference with measured contact and current robot state.
+3. The native backend searches over short-horizon actions in MuJoCo.
+4. The selected first action is converted into `LowCmd`.
+5. The simulator publishes the next `LowState`, and the loop repeats.
+
+That is the current minimum closed loop for this repository.
+
+## 5. Near-term Engineering Priority
+
+The most important next step is not more pose tuning.
+
+It is tightening the coupling between:
+
+- real contact estimation
+- executed phase logic
+- native rollout prediction
+
+Until those three are aligned, the backend can still produce commands that are
+locally plausible but globally mistimed for a clean forward jump.

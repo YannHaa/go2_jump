@@ -10,6 +10,10 @@ safe_source() {
 
 safe_source /opt/ros/humble/setup.bash
 
+if [ -f /workspace/scripts/container_prepare_mujoco.sh ]; then
+  safe_source /workspace/scripts/container_prepare_mujoco.sh
+fi
+
 if [ -f /workspace/src/unitree_ros2/cyclonedds_ws/install/setup.bash ]; then
   safe_source /workspace/src/unitree_ros2/cyclonedds_ws/install/setup.bash
 fi

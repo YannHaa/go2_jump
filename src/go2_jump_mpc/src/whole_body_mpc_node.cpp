@@ -115,6 +115,14 @@ class WholeBodyMpcNode : public rclcpp::Node {
         "max_feedforward_torque_nm", config_.max_feedforward_torque_nm);
     config_.contact_force_threshold_n = declare_parameter(
         "contact_force_threshold_n", config_.contact_force_threshold_n);
+    config_.contact_release_threshold_n = declare_parameter(
+        "contact_release_threshold_n", config_.contact_release_threshold_n);
+    config_.contact_filter_alpha = declare_parameter(
+        "contact_filter_alpha", config_.contact_filter_alpha);
+    config_.contact_stable_cycles = declare_parameter(
+        "contact_stable_cycles", config_.contact_stable_cycles);
+    config_.min_contact_signal_force_n = declare_parameter(
+        "min_contact_signal_force_n", config_.min_contact_signal_force_n);
     config_.flight_contact_count_max = declare_parameter(
         "flight_contact_count_max", config_.flight_contact_count_max);
     config_.touchdown_contact_count_threshold = declare_parameter(
@@ -126,6 +134,12 @@ class WholeBodyMpcNode : public rclcpp::Node {
     config_.settle_vertical_velocity_threshold_mps = declare_parameter(
         "settle_vertical_velocity_threshold_mps",
         config_.settle_vertical_velocity_threshold_mps);
+    config_.mujoco_model_path = declare_parameter(
+        "mujoco_model_path", config_.mujoco_model_path);
+    config_.mujoco_rollout_steps = declare_parameter(
+        "mujoco_rollout_steps", config_.mujoco_rollout_steps);
+    config_.mujoco_rollout_substeps = declare_parameter(
+        "mujoco_rollout_substeps", config_.mujoco_rollout_substeps);
 
     config_.reference_config.gravity_mps2 = declare_parameter(
         "gravity_mps2", config_.reference_config.gravity_mps2);
@@ -220,18 +234,52 @@ class WholeBodyMpcNode : public rclcpp::Node {
       observation_.q[i] = msg.motor_state[i].q;
       observation_.dq[i] = msg.motor_state[i].dq;
     }
+    const double alpha = std::clamp(config_.contact_filter_alpha, 0.0, 1.0);
+    const double release_threshold =
+        std::min(config_.contact_release_threshold_n,
+                 config_.contact_force_threshold_n);
+    const int stable_cycles = std::max(config_.contact_stable_cycles, 1);
+    bool have_contact_proxy_signal = false;
     for (std::size_t i = 0; i < observation_.foot_force_est.size(); ++i) {
-      observation_.foot_force_est[i] = msg.foot_force_est[i];
-      if (observation_.foot_force_est[i] >= 0.5 * config_.contact_force_threshold_n) {
-        observation_.contact_signal_valid = true;
+      const double raw_force =
+          std::max(0.0, static_cast<double>(msg.foot_force_est[i]));
+      observation_.raw_foot_force_est[i] = raw_force;
+      filtered_contact_force_[i] =
+          alpha * raw_force + (1.0 - alpha) * filtered_contact_force_[i];
+      observation_.foot_force_est[i] = filtered_contact_force_[i];
+
+      if (raw_force >= config_.min_contact_signal_force_n ||
+          filtered_contact_force_[i] >= config_.min_contact_signal_force_n) {
+        have_contact_proxy_signal = true;
       }
-      observation_.foot_contact[i] = observation_.contact_signal_valid &&
-                                     observation_.foot_force_est[i] >=
-                                         config_.contact_force_threshold_n;
+
+      const bool candidate_contact = observation_.foot_contact[i]
+                                         ? filtered_contact_force_[i] >=
+                                               release_threshold
+                                         : filtered_contact_force_[i] >=
+                                               config_.contact_force_threshold_n;
+      if (candidate_contact == observation_.foot_contact[i]) {
+        pending_contact_state_[i] = candidate_contact;
+        pending_contact_ticks_[i] = 0;
+      } else if (candidate_contact != pending_contact_state_[i]) {
+        pending_contact_state_[i] = candidate_contact;
+        pending_contact_ticks_[i] = 1;
+      } else {
+        ++pending_contact_ticks_[i];
+        if (pending_contact_ticks_[i] >= stable_cycles) {
+          observation_.foot_contact[i] = candidate_contact;
+          pending_contact_ticks_[i] = 0;
+        }
+      }
     }
+    observation_.contact_signal_valid =
+        observation_.contact_signal_valid || have_contact_proxy_signal;
     observation_.body_rpy[0] = msg.imu_state.rpy[0];
     observation_.body_rpy[1] = msg.imu_state.rpy[1];
     observation_.body_rpy[2] = msg.imu_state.rpy[2];
+    observation_.body_angular_velocity[0] = msg.imu_state.gyroscope[0];
+    observation_.body_angular_velocity[1] = msg.imu_state.gyroscope[1];
+    observation_.body_angular_velocity[2] = msg.imu_state.gyroscope[2];
   }
 
   void OnSportState(const unitree_go::msg::SportModeState& msg) {
@@ -300,6 +348,9 @@ class WholeBodyMpcNode : public rclcpp::Node {
 
   go2_jump_mpc::WholeBodyMpcConfig config_{};
   go2_jump_mpc::RobotObservation observation_{};
+  std::array<double, 4> filtered_contact_force_{};
+  std::array<bool, 4> pending_contact_state_{};
+  std::array<int, 4> pending_contact_ticks_{};
   go2_jump_core::JumpTaskSpec active_task_{};
   bool have_task_{false};
   bool task_started_{false};

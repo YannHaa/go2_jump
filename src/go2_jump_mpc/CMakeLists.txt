@@ -11,6 +11,15 @@ find_package(go2_jump_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(unitree_go REQUIRED)
 
+set(MUJOCO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/mujoco-3.3.6")
+find_library(MUJOCO_LIB NAMES mujoco libmujoco.so
+  PATHS "${MUJOCO_ROOT}/lib"
+  NO_DEFAULT_PATH
+)
+if(NOT MUJOCO_LIB)
+  message(FATAL_ERROR "Could not find MuJoCo library under ${MUJOCO_ROOT}/lib")
+endif()
+
 add_library(${PROJECT_NAME} SHARED
   src/unitree_crc.cpp
   src/whole_body_mpc.cpp
@@ -19,6 +28,12 @@ target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+)
+target_include_directories(${PROJECT_NAME} PRIVATE "${MUJOCO_ROOT}/include")
+target_link_libraries(${PROJECT_NAME} "${MUJOCO_LIB}")
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  BUILD_RPATH "${MUJOCO_ROOT}/lib"
+  INSTALL_RPATH "${MUJOCO_ROOT}/lib"
 )
 ament_target_dependencies(${PROJECT_NAME}
   go2_jump_core

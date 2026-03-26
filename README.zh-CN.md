@@ -2,65 +2,66 @@
 
 [English](README.md)
 
-这个仓库已经彻底切到一条新的主线，目标非常明确：
+这个仓库围绕一个明确的工程目标组织：
 
-围绕 `Go2 + Unitree MuJoCo + LowCmd/LowState`，构建一个真正面向研究和论文产出的
-高质量前跳控制器，新主线选择 `MuJoCo-native whole-body MPC`。
+基于 `LowCmd / LowState` 接口，为 Unitree Go2 构建一个按目标距离条件化的前跳控制器，
+主仿真平台使用 `unitree_mujoco`，主控制方向选择 MuJoCo-native whole-body MPC。
 
-旧的模板式前跳控制实验已经从项目主结构中移除，不再继续作为主线维护。新的目录
-组织从一开始就面向研究型开发、系统辨识、对比实验和论文叙事。
+旧的模板式前跳实验已经不再作为项目基线。当前主线强调的是仿真可信度、接触感知控制
+和可重复的 backend 迭代流程。
 
-## 新主线方向
+## 主线方向
 
 - 仿真平台：`unitree_mujoco`
-- 通信链路：`unitree_ros2` + `LowCmd` / `LowState`
-- 任务接口：按目标距离条件化的 jump task
-- 控制主线：`MuJoCo-native whole-body MPC`
-- 落地策略：接触感知 + reactive landing
-- 核心指标：主要靠腾空完成前移，并且落地干净稳定
+- 通信链路：`unitree_ros2`
+- 任务接口：`JumpTask`
+- 低层控制链路：`LowCmd`
+- 主控制包：`go2_jump_mpc`
+- 长期目标：`接触感知规划 -> MuJoCo-native MPC -> 低层执行`
 
-## 当前目录结构
+## 目录结构
 
 - `src/unitree_ros2`
   上游 Unitree ROS 2 依赖。
 - `src/unitree_mujoco`
-  上游 Unitree MuJoCo 依赖。
+  上游 Unitree MuJoCo 依赖，叠加了本地兼容修正。
 - `src/go2_jump_msgs`
-  jump task 相关的 ROS 2 接口。
+  jump task 和控制器诊断消息。
 - `src/go2_jump_core`
-  负责目标距离到 jump task 的生成，以及参考量采样。
+  目标距离到跳跃任务的构造，以及参考量采样。
 - `src/go2_jump_mpc`
-  新的 whole-body MPC 主线包。
+  接触估计、阶段管理、preview 控制和 MuJoCo-native MPC backend。
 - `src/go2_jump_bringup`
-  新主线的 launch 和共享参数。
-- `docs/`
-  架构设计和研究路线文档。
+  launch 文件和共享参数。
 - `scripts/`
-  新主线的 Docker 构建和运行脚本。
-- `patches/`
-  针对上游依赖的可复现补丁。
+  Docker 构建、启动和自检脚本。
+- `docs/`
+  架构说明和研究路线文档。
 
-## 当前已经完成的事情
+## 当前进展
 
-这次重构已经不只是“空骨架”，而是把最小闭环真的打通了：
+当前工作区已经有一个可运行的最小闭环，同时已经接入了一个实验中的原生 backend。
 
-- `unitree_ros2`、`go2_jump_*`、`unitree_mujoco` 可以统一通过 Docker 构建
-- 建立了任务层 jump specification
-- 建立了带接触感知阶段切换保护逻辑的 preview controller 骨架
-- 打通了 `LowCmd` 下发链路
-- 增加了 `JumpControllerState` 调试话题
-- 为上游依赖保留了可复现 patch 机制
+已经验证：
 
-当前主线已经验证过：
+- headless `unitree_mujoco` 现在能够正常推进并发布非零 `/lowstate`
+- `/lowstate` 已经包含非零关节状态、IMU 状态和持续增长的 tick
+- `foot_force` / `foot_force_est` 不再是占位量；在低层控制运行时，它们会反映基于 MuJoCo 接触解算得到的支撑载荷
+- `go2_jump_mpc` 能以约 `200 Hz` 发布 `/lowcmd`
+- `reference_preview` 仍然是当前最稳定的基线 backend
+- `mujoco_native_mpc` 已经接入、可编译、可启动，并且走通了同一条低层控制链路
 
-- `unitree_mujoco` 能发布 `/lowstate`
-- `enable_lowcmd_output=true` 时，控制器能以约 `200 Hz` 发布 `/lowcmd`
-- `/go2_jump/controller_state` 可用于观察 phase、contact 和 backend 状态
+当前限制：
 
-需要明确的是：最终的 MuJoCo-native 优化求解器还没有接进来。现在的 backend 仍然是
-`reference_preview`，它的作用是先把外层闭环、诊断接口和求解器边界稳定下来。
+- `mujoco_native_mpc` 还不能算高质量前跳控制器
+- 它已经能生成有接触语义的低层命令，但起跳时机和阶段对齐还需要继续打磨，离“主要靠腾空完成前移的干净前跳”还有距离
+
+也就是说，这个项目已经过了单纯的 bring-up 阶段，但现在仍然处在控制器迭代阶段，
+还不是最终的 benchmark 版本。
 
 ## 快速开始
+
+构建工作区：
 
 ```bash
 cd /home/hayan/go2_jump_ws
@@ -76,29 +77,42 @@ cd /home/hayan/go2_jump_ws
 ./scripts/docker_run_go2_mujoco.sh
 ```
 
-启动新的 MPC 主线：
+使用稳定 preview backend 启动跳跃栈：
 
 ```bash
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 ./scripts/docker_launch_jump_mpc.sh 0.25
 ```
 
-运行最小闭环自检：
+使用 MuJoCo-native backend 启动跳跃栈：
+
+```bash
+GO2_JUMP_SOLVER_BACKEND=mujoco_native_mpc \
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_launch_jump_mpc.sh 0.25
+```
+
+运行自检：
 
 ```bash
 ./scripts/docker_smoke_test_stack.sh 0.25
-GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true ./scripts/docker_smoke_test_stack.sh 0.20
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_smoke_test_stack.sh 0.25
+GO2_JUMP_SOLVER_BACKEND=mujoco_native_mpc \
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_smoke_test_stack.sh 0.25
 ```
 
 ## 建议阅读顺序
 
-1. 先读本文件，了解为什么这次重构要直接切主线。
-2. 再读 [算法说明](algorithm.zh-CN.md)，先把 planner、controller、backend 三层理顺。
-3. 再读 [架构说明](docs/architecture.zh-CN.md)，理解新的包划分。
-4. 再读 [研究路线](docs/research_program.zh-CN.md)，理解 MPC 主线后续怎么推进。
+1. 先读本文件，建立对仓库入口和当前状态的整体认识。
+2. 再读 [算法说明](algorithm.zh-CN.md)，理解 planner / controller / backend 三层分工。
+3. 再读 [架构说明](docs/architecture.zh-CN.md)，理解包结构和依赖关系。
+4. 最后读 [研究路线](docs/research_program.zh-CN.md)，了解当前控制器之后该往哪里推进。
 
-## 当前默认假设
+## 实用说明
 
-- 仍然以 `unitree_mujoco` 和 `unitree_ros2` 为基础依赖。
-- MuJoCo bridge 的本地兼容修改会通过 `patches/` 目录管理。
-- Docker 继续作为主开发环境，原因很简单：ROS 2、MuJoCo 和 Unitree 依赖需要
-  可复现。
+- Docker 是当前参考环境。
+- 如果目标是验证接口链路和传输稳定性，优先使用 `reference_preview`。
+- 如果目标是继续开发主控制器，使用 `mujoco_native_mpc`。
+- 目前最有价值的调试话题是 `/lowstate`、`/lowcmd` 和 `/go2_jump/controller_state`。

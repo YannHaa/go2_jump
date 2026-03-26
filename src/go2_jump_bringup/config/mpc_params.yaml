@@ -35,11 +35,18 @@ go2_jump_mpc_node:
     settle_kp: 45.0
     settle_kd: 5.0
     max_feedforward_torque_nm: 18.0
-    contact_force_threshold_n: 12.0
+    contact_force_threshold_n: 8.0
+    contact_release_threshold_n: 3.0
+    contact_filter_alpha: 0.35
+    contact_stable_cycles: 2
+    min_contact_signal_force_n: 1.0
     flight_contact_count_max: 1
     touchdown_contact_count_threshold: 2
     min_flight_time_before_touchdown_s: 0.03
     settle_vertical_velocity_threshold_mps: 0.20
+    mujoco_model_path: /workspace/src/unitree_mujoco/unitree_robots/go2/scene.xml
+    mujoco_rollout_steps: 18
+    mujoco_rollout_substeps: 2
     gravity_mps2: 9.81
     crouch_height_offset_m: -0.08
     push_height_offset_m: 0.03

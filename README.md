@@ -2,67 +2,69 @@
 
 [中文文档](README.zh-CN.md)
 
-This repository has been reset onto a new mainline focused on one question:
+This repository is focused on one engineering target:
 
-how to build a high-quality, distance-conditioned forward jump controller for
-Unitree Go2 using low-level control and a MuJoCo-native whole-body MPC stack.
+build a distance-conditioned forward jump controller for Unitree Go2 on the
+`LowCmd / LowState` interface, using `unitree_mujoco` as the primary simulator
+and a MuJoCo-native whole-body MPC line as the main control direction.
 
-The previous template-controller experiment has been intentionally removed from
-the active project structure. The new repository is organized for research,
-system identification, and paper-grade experiments.
+The old template-only jump experiment is no longer the project baseline. The
+active tree is organized around simulation fidelity, contact-aware control, and
+repeatable backend iteration.
 
-## Mainline Direction
+## Mainline
 
 - simulator: `unitree_mujoco`
-- communication: `unitree_ros2` + `LowCmd` / `LowState`
-- task interface: distance-conditioned jump task specification
-- controller goal: `MuJoCo-native whole-body MPC`
-- landing strategy: contact-aware reactive landing
-- evaluation target: airborne-dominant forward jump with clean touchdown
+- transport: `unitree_ros2`
+- task interface: `JumpTask`
+- low-level command path: `LowCmd`
+- core control package: `go2_jump_mpc`
+- long-term target: `contact-aware planner -> MuJoCo-native MPC -> low-level execution`
 
-## Current Repository Layout
+## Repository Layout
 
 - `src/unitree_ros2`
   Upstream Unitree ROS 2 dependency.
 - `src/unitree_mujoco`
-  Upstream Unitree MuJoCo dependency.
+  Upstream Unitree MuJoCo dependency, with local compatibility fixes.
 - `src/go2_jump_msgs`
-  ROS 2 interfaces for jump-task exchange.
+  ROS 2 messages for jump tasks and controller diagnostics.
 - `src/go2_jump_core`
-  Distance-conditioned jump task generation and reference sampling.
+  Distance-conditioned task construction and reference sampling.
 - `src/go2_jump_mpc`
-  New whole-body MPC mainline package.
+  Contact estimation, phase management, preview control, and MuJoCo-native MPC backend.
 - `src/go2_jump_bringup`
-  Launch files and shared parameter files for the MPC stack.
-- `docs/`
-  Architecture and research-program documents.
+  Launch files and shared parameter sets.
 - `scripts/`
-  Docker build and runtime helpers for the new stack.
-- `patches/`
-  Reproducible local patches applied on top of upstream dependencies.
+  Docker build, launch, and smoke-test helpers.
+- `docs/`
+  Architecture and research notes.
 
-## What Exists Today
+## Current Status
 
-The current reset already provides a verified minimum closed loop:
+The current workspace has a working minimum closed loop and one experimental
+native backend.
 
-- Docker-based build for `unitree_ros2`, `go2_jump_*`, and `unitree_mujoco`
-- a task-level jump specification
-- a contact-aware preview controller scaffold with signal-validity guards
-- `LowCmd` publication at controller rate
-- `JumpControllerState` diagnostics for controller bring-up
-- reproducibility hooks for upstream dependency patches
+Verified:
 
-Verified on the current host:
+- headless `unitree_mujoco` now steps correctly and publishes non-zero `/lowstate`
+- `/lowstate` carries non-zero joint state, IMU state, and tick progression
+- `foot_force` / `foot_force_est` are no longer transport placeholders; during active low-level control they now reflect MuJoCo contact-derived support loads
+- `go2_jump_mpc` publishes `/lowcmd` at about `200 Hz`
+- `reference_preview` remains the stable baseline backend
+- `mujoco_native_mpc` is integrated, builds cleanly, launches, and drives the same low-level command path
 
-- `/lowstate` publishes from `unitree_mujoco`
-- `/lowcmd` publishes at about `200 Hz` when `enable_lowcmd_output=true`
-- `/go2_jump/controller_state` is available for phase and contact debugging
+Current limitation:
 
-The whole-body MPC optimizer itself is not finished yet. The current backend is
-`reference_preview`, which keeps the external control chain stable while the
-MuJoCo-native optimizer is rebuilt.
+- `mujoco_native_mpc` is not yet a high-quality forward jump controller
+- the backend can produce meaningful contact-aware commands, but its takeoff timing and phase alignment still need work before it becomes a clean airborne-dominant jump policy
+
+In other words, the project is past bring-up, but still in controller-development
+mode rather than benchmark-ready mode.
 
 ## Quick Start
+
+Build the workspace:
 
 ```bash
 cd /home/hayan/go2_jump_ws
@@ -72,36 +74,48 @@ cd /home/hayan/go2_jump_ws
 ./scripts/docker_build_workspace.sh
 ```
 
-To start the simulator:
+Run the simulator:
 
 ```bash
 ./scripts/docker_run_go2_mujoco.sh
 ```
 
-To launch the new MPC-oriented stack:
+Launch the jump stack with the stable preview backend:
 
 ```bash
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 ./scripts/docker_launch_jump_mpc.sh 0.25
 ```
 
-To run an end-to-end smoke test:
+Launch the MuJoCo-native backend:
+
+```bash
+GO2_JUMP_SOLVER_BACKEND=mujoco_native_mpc \
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_launch_jump_mpc.sh 0.25
+```
+
+Run the smoke test:
 
 ```bash
 ./scripts/docker_smoke_test_stack.sh 0.25
-GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true ./scripts/docker_smoke_test_stack.sh 0.20
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_smoke_test_stack.sh 0.25
+GO2_JUMP_SOLVER_BACKEND=mujoco_native_mpc \
+GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
+./scripts/docker_smoke_test_stack.sh 0.25
 ```
 
 ## Recommended Reading Order
 
-1. Read this file for the reset rationale and workspace entrypoints.
+1. Read this file for the repository entrypoints and current status.
 2. Read [Algorithm](algorithm.md) for the planner / controller / backend split.
-3. Read [Architecture](docs/architecture.md) for the new package split.
-4. Read [Research Program](docs/research_program.md) for the MPC roadmap and
-   experiment plan.
+3. Read [Architecture](docs/architecture.md) for the package structure.
+4. Read [Research Program](docs/research_program.md) for the roadmap beyond the current controller.
 
-## Current Assumptions
+## Practical Notes
 
-- The repository still relies on `unitree_mujoco` and `unitree_ros2`.
-- A local compatibility patch is kept for the MuJoCo bridge under `patches/`.
-- Docker remains the primary environment because it keeps ROS 2, MuJoCo, and
-  Unitree dependencies reproducible across machines.
+- Docker is the reference environment.
+- `reference_preview` is still the safest backend when the goal is transport and interface validation.
+- `mujoco_native_mpc` is the active development path.
+- The most useful debug topics today are `/lowstate`, `/lowcmd`, and `/go2_jump/controller_state`.

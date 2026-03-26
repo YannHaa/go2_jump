@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_TAG="${GO2_JUMP_IMAGE:-go2-jump-humble:latest}"
 TARGET_DISTANCE_M="${1:-0.25}"
 ENABLE_LOWCMD_OUTPUT="${GO2_JUMP_ENABLE_LOWCMD_OUTPUT:-false}"
+SOLVER_BACKEND="${GO2_JUMP_SOLVER_BACKEND:-reference_preview}"
 SIM_CONTAINER_NAME="go2-jump-smoke-sim-$$"
 STACK_CONTAINER_NAME="go2-jump-smoke-stack-$$"
 
@@ -48,6 +49,16 @@ echo "[2/4] Waiting for /lowstate"
 wait_for_topic /lowstate 20 1
 echo "       /lowstate is available"
 
+echo "       LowState contact sample:"
+docker run --rm --net host \
+  --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
+  -e ROS_LOG_DIR=/tmp/roslog \
+  -v "${ROOT_DIR}:/workspace" \
+  -w /workspace \
+  "${IMAGE_TAG}" \
+  bash -lc 'source /workspace/scripts/container_source_env.sh && timeout 4 ros2 topic echo /lowstate --once'
+
 echo "[3/4] Starting jump stack container"
 docker run -d --name "${STACK_CONTAINER_NAME}" --rm --net host \
   --user "$(id -u):$(id -g)" \
@@ -56,7 +67,7 @@ docker run -d --name "${STACK_CONTAINER_NAME}" --rm --net host \
   -v "${ROOT_DIR}:/workspace" \
   -w /workspace \
   "${IMAGE_TAG}" \
-  bash -lc "source /workspace/scripts/container_source_env.sh && exec stdbuf -oL -eL ros2 launch go2_jump_bringup sim_jump_mpc.launch.py target_distance_m:=${TARGET_DISTANCE_M} solver_backend:=reference_preview enable_lowcmd_output:=${ENABLE_LOWCMD_OUTPUT} auto_start:=true" >/dev/null
+  bash -lc "source /workspace/scripts/container_source_env.sh && exec stdbuf -oL -eL ros2 launch go2_jump_bringup sim_jump_mpc.launch.py target_distance_m:=${TARGET_DISTANCE_M} solver_backend:=${SOLVER_BACKEND} enable_lowcmd_output:=${ENABLE_LOWCMD_OUTPUT} auto_start:=true" >/dev/null
 
 echo "[4/4] Waiting for /go2_jump/controller_state"
 wait_for_topic /go2_jump/controller_state 20 1
