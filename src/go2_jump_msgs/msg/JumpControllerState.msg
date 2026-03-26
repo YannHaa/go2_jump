@@ -13,6 +13,7 @@ float64 vertical_velocity_mps
 float64[4] foot_force_est
 bool[4] foot_contact
 uint8 contact_count
+bool contact_signal_valid
 bool contact_override
 bool backend_ready
 bool lowcmd_enabled

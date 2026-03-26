@@ -47,7 +47,7 @@ The current reset already provides a verified minimum closed loop:
 
 - Docker-based build for `unitree_ros2`, `go2_jump_*`, and `unitree_mujoco`
 - a task-level jump specification
-- a contact-aware preview controller scaffold
+- a contact-aware preview controller scaffold with signal-validity guards
 - `LowCmd` publication at controller rate
 - `JumpControllerState` diagnostics for controller bring-up
 - reproducibility hooks for upstream dependency patches

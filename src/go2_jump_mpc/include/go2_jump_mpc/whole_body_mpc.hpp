@@ -18,6 +18,7 @@ struct RobotObservation {
   std::array<double, kControlledJointCount> dq{};
   std::array<double, 4> foot_force_est{};
   std::array<bool, 4> foot_contact{};
+  bool contact_signal_valid{false};
   std::array<double, 3> body_rpy{};
   std::array<double, 3> body_velocity{};
   std::array<double, 3> position{};
@@ -39,6 +40,7 @@ struct WholeBodyMpcCommand {
   bool lowcmd_enabled{false};
   std::string backend_name{"reference_preview"};
   go2_jump_core::JumpPhase phase{go2_jump_core::JumpPhase::kCrouch};
+  bool contact_signal_valid{false};
   bool contact_override{false};
   std::array<bool, 4> foot_contact{};
   int contact_count{0};

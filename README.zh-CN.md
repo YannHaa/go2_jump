@@ -46,7 +46,7 @@
 
 - `unitree_ros2`、`go2_jump_*`、`unitree_mujoco` 可以统一通过 Docker 构建
 - 建立了任务层 jump specification
-- 建立了带接触感知阶段切换的 preview controller 骨架
+- 建立了带接触感知阶段切换保护逻辑的 preview controller 骨架
 - 打通了 `LowCmd` 下发链路
 - 增加了 `JumpControllerState` 调试话题
 - 为上游依赖保留了可复现 patch 机制

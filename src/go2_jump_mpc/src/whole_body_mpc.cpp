@@ -56,6 +56,7 @@ WholeBodyMpcCommand WholeBodyMpc::Solve(const RobotObservation& observation,
   command.backend_name = config_.solver_backend;
   command.backend_ready = (config_.solver_backend == "reference_preview");
   command.lowcmd_enabled = config_.enable_lowcmd_output;
+  command.contact_signal_valid = observation.contact_signal_valid;
   command.foot_contact = observation.foot_contact;
   command.contact_count = CountContacts(observation.foot_contact);
 
@@ -198,6 +199,10 @@ go2_jump_core::JumpReferenceSample WholeBodyMpc::ApplyContactOverrides(
     const RobotObservation& observation,
     double task_elapsed_s) const {
   auto sample = planned_sample;
+  if (!observation.contact_signal_valid) {
+    return sample;
+  }
+
   const int contact_count = CountContacts(observation.foot_contact);
   const double push_end = task_.crouch_duration_s + task_.push_duration_s;
   const double flight_elapsed_s = std::max(0.0, task_elapsed_s - push_end);

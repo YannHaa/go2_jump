@@ -68,6 +68,10 @@ phase manager:
 - once touchdown is stable and vertical motion is small, the controller can
   switch to settle
 
+To avoid false overrides, the controller only enables those contact-based phase
+changes after it has seen a non-trivial contact signal from the observation
+stream.
+
 This is still a preview controller, not the final optimizer, but it gives the
 project an observation-driven closed loop instead of a pure open-loop script.
 

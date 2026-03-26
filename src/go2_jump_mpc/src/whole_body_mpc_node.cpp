@@ -79,6 +79,7 @@ go2_jump_msgs::msg::JumpControllerState ToDebugMessage(
   msg.forward_velocity_mps = observation.body_velocity[0];
   msg.vertical_velocity_mps = observation.body_velocity[2];
   msg.contact_count = static_cast<uint8_t>(command.contact_count);
+  msg.contact_signal_valid = command.contact_signal_valid;
   msg.contact_override = command.contact_override;
   msg.backend_ready = command.backend_ready;
   msg.lowcmd_enabled = command.lowcmd_enabled;
@@ -221,8 +222,12 @@ class WholeBodyMpcNode : public rclcpp::Node {
     }
     for (std::size_t i = 0; i < observation_.foot_force_est.size(); ++i) {
       observation_.foot_force_est[i] = msg.foot_force_est[i];
-      observation_.foot_contact[i] =
-          observation_.foot_force_est[i] >= config_.contact_force_threshold_n;
+      if (observation_.foot_force_est[i] >= 0.5 * config_.contact_force_threshold_n) {
+        observation_.contact_signal_valid = true;
+      }
+      observation_.foot_contact[i] = observation_.contact_signal_valid &&
+                                     observation_.foot_force_est[i] >=
+                                         config_.contact_force_threshold_n;
     }
     observation_.body_rpy[0] = msg.imu_state.rpy[0];
     observation_.body_rpy[1] = msg.imu_state.rpy[1];
@@ -269,10 +274,11 @@ class WholeBodyMpcNode : public rclcpp::Node {
       last_phase_name_ = phase_name;
       RCLCPP_INFO(
           get_logger(),
-          "MPC phase=%s elapsed=%.3f backend=%s preview_points=%zu lowcmd=%s contacts=%d override=%s",
+          "MPC phase=%s elapsed=%.3f backend=%s preview_points=%zu lowcmd=%s contacts=%d signal=%s override=%s",
           phase_name.c_str(), task_elapsed_s, command.backend_name.c_str(),
           command.preview.size(), command.lowcmd_enabled ? "true" : "false",
-          command.contact_count, command.contact_override ? "true" : "false");
+          command.contact_count, command.contact_signal_valid ? "true" : "false",
+          command.contact_override ? "true" : "false");
     }
 
     if (!command.lowcmd_enabled) {
