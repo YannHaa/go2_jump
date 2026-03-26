@@ -125,6 +125,11 @@ struct SagittalLegKinematics {
   double dz_dcalf{0.0};
 };
 
+struct SagittalFootPoint {
+  double x_m{0.0};
+  double z_m{0.0};
+};
+
 struct ContactWrenchTargets {
   double total_fx_n{0.0};
   double total_fz_n{0.0};
@@ -351,6 +356,24 @@ class JumpControllerNode : public rclcpp::Node {
         this->declare_parameter("support_pitch_rate_gain", 0.06);
     support_pitch_correction_limit_rad_ =
         this->declare_parameter("support_pitch_correction_limit_rad", 0.18);
+    pitch_capture_foot_delta_gain_m_per_rad_ = this->declare_parameter(
+        "pitch_capture_foot_delta_gain_m_per_rad", 0.035);
+    pitch_capture_foot_delta_rate_gain_m_per_radps_ = this->declare_parameter(
+        "pitch_capture_foot_delta_rate_gain_m_per_radps", 0.008);
+    pitch_capture_foot_delta_limit_m_ = this->declare_parameter(
+        "pitch_capture_foot_delta_limit_m", 0.03);
+    pitch_capture_front_z_scale_ = this->declare_parameter(
+        "pitch_capture_front_z_scale", 0.75);
+    pitch_capture_rear_z_scale_ = this->declare_parameter(
+        "pitch_capture_rear_z_scale", 0.35);
+    flight_pitch_capture_gain_scale_ = this->declare_parameter(
+        "flight_pitch_capture_gain_scale", 0.80);
+    landing_pitch_capture_gain_scale_ = this->declare_parameter(
+        "landing_pitch_capture_gain_scale", 1.00);
+    support_pitch_capture_gain_scale_ = this->declare_parameter(
+        "support_pitch_capture_gain_scale", 1.15);
+    support_pitch_capture_fade_duration_s_ = this->declare_parameter(
+        "support_pitch_capture_fade_duration_s", 0.12);
     takeoff_wait_timeout_s_ =
         this->declare_parameter("takeoff_wait_timeout_s", 0.18);
     landing_wait_timeout_s_ =
@@ -624,6 +647,109 @@ class JumpControllerNode : public rclcpp::Node {
     pose[8] += kCompactnessToCalfScale * compactness_correction;
     pose[10] -= compactness_correction;
     pose[11] += kCompactnessToCalfScale * compactness_correction;
+  }
+
+  SagittalFootPoint ForwardKinematicsFromPose(
+      const std::array<double, 12>& pose, std::size_t thigh_index,
+      std::size_t calf_index) const {
+    SagittalFootPoint foot_point{};
+    if (thigh_index >= pose.size() || calf_index >= pose.size()) {
+      return foot_point;
+    }
+
+    const double thigh_rad = pose[thigh_index];
+    const double calf_rad = pose[calf_index];
+    const double leg_angle = thigh_rad + calf_rad;
+    const double l1 = leg_link_length_m_;
+    const double l2 = leg_link_length_m_;
+    foot_point.x_m =
+        l1 * std::sin(thigh_rad) + l2 * std::sin(leg_angle);
+    foot_point.z_m =
+        -(l1 * std::cos(thigh_rad) + l2 * std::cos(leg_angle));
+    return foot_point;
+  }
+
+  bool SolveSagittalLegIk(double x_m, double z_m, double& thigh_rad,
+                          double& calf_rad) const {
+    const double l1 = leg_link_length_m_;
+    const double l2 = leg_link_length_m_;
+    const double min_radius_m = 1e-5;
+    const double max_radius_m = std::max(min_radius_m, l1 + l2 - 1e-5);
+    const double radius_m = Clamp(std::sqrt(x_m * x_m + z_m * z_m),
+                                  min_radius_m, max_radius_m);
+    const double cos_calf = Clamp((radius_m * radius_m - l1 * l1 - l2 * l2) /
+                                      (2.0 * l1 * l2),
+                                  -1.0, 1.0);
+    calf_rad = -std::acos(cos_calf);
+    const double k1 = l1 + l2 * std::cos(calf_rad);
+    const double k2 = l2 * std::sin(calf_rad);
+    thigh_rad = std::atan2(x_m, -z_m) - std::atan2(k2, k1);
+    return std::isfinite(thigh_rad) && std::isfinite(calf_rad);
+  }
+
+  void ApplySymmetricLegConfiguration(std::array<double, 12>& pose,
+                                      double front_thigh_rad,
+                                      double front_calf_rad,
+                                      double rear_thigh_rad,
+                                      double rear_calf_rad) const {
+    pose[1] = front_thigh_rad;
+    pose[2] = front_calf_rad;
+    pose[4] = front_thigh_rad;
+    pose[5] = front_calf_rad;
+    pose[7] = rear_thigh_rad;
+    pose[8] = rear_calf_rad;
+    pose[10] = rear_thigh_rad;
+    pose[11] = rear_calf_rad;
+  }
+
+  void ApplyPitchCaptureFootPlacementCorrection(
+      std::array<double, 12>& pose, double pitch_target_deg,
+      double gain_scale) const {
+    if (!have_low_state_ || gain_scale <= 1e-6 ||
+        pitch_capture_foot_delta_limit_m_ <= 1e-6) {
+      return;
+    }
+
+    const double pitch_rad =
+        static_cast<double>(latest_low_state_.imu_state.rpy[1]);
+    const double pitch_rate_radps =
+        static_cast<double>(latest_low_state_.imu_state.gyroscope[1]);
+    const double pitch_target_rad = pitch_target_deg / kRadToDeg;
+    const double pitch_error_rad = pitch_target_rad - pitch_rad;
+    const double foot_delta_m = Clamp(
+        gain_scale *
+            (pitch_capture_foot_delta_gain_m_per_rad_ * pitch_error_rad -
+             pitch_capture_foot_delta_rate_gain_m_per_radps_ *
+                 pitch_rate_radps),
+        -pitch_capture_foot_delta_limit_m_, pitch_capture_foot_delta_limit_m_);
+    if (std::abs(foot_delta_m) <= 1e-6) {
+      return;
+    }
+
+    auto front_foot =
+        ForwardKinematicsFromPose(pose, kThighJointIndices[0], kCalfJointIndices[0]);
+    auto rear_foot =
+        ForwardKinematicsFromPose(pose, kThighJointIndices[2], kCalfJointIndices[2]);
+    const double rear_x_ratio =
+        Clamp(planner_config_.landing_capture_rear_ratio, 0.0, 1.5);
+    front_foot.x_m += foot_delta_m;
+    rear_foot.x_m -= rear_x_ratio * foot_delta_m;
+    front_foot.z_m -= pitch_capture_front_z_scale_ * foot_delta_m;
+    rear_foot.z_m += pitch_capture_rear_z_scale_ * foot_delta_m;
+
+    double front_thigh_rad = pose[1];
+    double front_calf_rad = pose[2];
+    double rear_thigh_rad = pose[7];
+    double rear_calf_rad = pose[8];
+    if (!SolveSagittalLegIk(front_foot.x_m, front_foot.z_m, front_thigh_rad,
+                            front_calf_rad) ||
+        !SolveSagittalLegIk(rear_foot.x_m, rear_foot.z_m, rear_thigh_rad,
+                            rear_calf_rad)) {
+      return;
+    }
+
+    ApplySymmetricLegConfiguration(pose, front_thigh_rad, front_calf_rad,
+                                   rear_thigh_rad, rear_calf_rad);
   }
 
   double CurrentHeightAboveBaselineM() const {
@@ -1317,6 +1443,24 @@ class JumpControllerNode : public rclcpp::Node {
     stream << "  support_pitch_rate_gain: " << support_pitch_rate_gain_ << "\n";
     stream << "  support_pitch_correction_limit_rad: "
            << support_pitch_correction_limit_rad_ << "\n";
+    stream << "  pitch_capture_foot_delta_gain_m_per_rad: "
+           << pitch_capture_foot_delta_gain_m_per_rad_ << "\n";
+    stream << "  pitch_capture_foot_delta_rate_gain_m_per_radps: "
+           << pitch_capture_foot_delta_rate_gain_m_per_radps_ << "\n";
+    stream << "  pitch_capture_foot_delta_limit_m: "
+           << pitch_capture_foot_delta_limit_m_ << "\n";
+    stream << "  pitch_capture_front_z_scale: "
+           << pitch_capture_front_z_scale_ << "\n";
+    stream << "  pitch_capture_rear_z_scale: "
+           << pitch_capture_rear_z_scale_ << "\n";
+    stream << "  flight_pitch_capture_gain_scale: "
+           << flight_pitch_capture_gain_scale_ << "\n";
+    stream << "  landing_pitch_capture_gain_scale: "
+           << landing_pitch_capture_gain_scale_ << "\n";
+    stream << "  support_pitch_capture_gain_scale: "
+           << support_pitch_capture_gain_scale_ << "\n";
+    stream << "  support_pitch_capture_fade_duration_s: "
+           << support_pitch_capture_fade_duration_s_ << "\n";
     stream << "  takeoff_forward_displacement_m: "
            << FormatDouble(trial_metrics_.takeoff_forward_displacement_m) << "\n";
     stream << "  takeoff_height_above_start_m: "
@@ -1560,6 +1704,9 @@ class JumpControllerNode : public rclcpp::Node {
       ApplyPitchCompactnessCorrection(target_pose, pitch_target_deg,
                                       compactness_gain, pitch_rate_gain,
                                       correction_limit_rad);
+      ApplyPitchCaptureFootPlacementCorrection(
+          target_pose, pitch_target_deg,
+          flight_pitch_capture_gain_scale_ * landing_prep_blend);
     } else if (runtime_phase_ == RuntimePhase::kLanding) {
       kp = landing_kp_;
       kd = landing_kd_;
@@ -1587,6 +1734,13 @@ class JumpControllerNode : public rclcpp::Node {
       ApplyPitchCompactnessCorrection(target_pose, pitch_target_deg,
                                       compactness_gain, pitch_rate_gain,
                                       correction_limit_rad);
+      const double capture_gain_scale =
+          landing_pitch_capture_gain_scale_ +
+          (support_pitch_capture_gain_scale_ -
+           landing_pitch_capture_gain_scale_) *
+              landing_alpha;
+      ApplyPitchCaptureFootPlacementCorrection(target_pose, pitch_target_deg,
+                                               capture_gain_scale);
       ApplyLegTorque(-plan_.landing_thigh_tau_ff * landing_front_tau_scale_,
                      -plan_.landing_calf_tau_ff * landing_front_tau_scale_,
                      -plan_.landing_thigh_tau_ff * landing_rear_tau_scale_,
@@ -1611,14 +1765,29 @@ class JumpControllerNode : public rclcpp::Node {
                                         support_pitch_rate_gain_ * correction_fade,
                                         support_pitch_correction_limit_rad_ *
                                             correction_fade);
+        ApplyPitchCaptureFootPlacementCorrection(
+            target_pose, support_pitch_target_deg_,
+            support_pitch_capture_gain_scale_ * correction_fade);
       } else {
         kp = support_kp_;
         kd = support_kd_;
         target_pose = relaxed_support_pose;
+        const double time_in_recovery_s =
+            std::max(0.0, elapsed - phase_start_elapsed_s_);
+        double support_capture_fade = 1.0;
+        if (support_pitch_capture_fade_duration_s_ > 1e-6) {
+          support_capture_fade =
+              1.0 -
+              Clamp(time_in_recovery_s / support_pitch_capture_fade_duration_s_,
+                    0.0, 1.0);
+        }
         ApplyPitchCompactnessCorrection(target_pose, support_pitch_target_deg_,
                                         support_pitch_compactness_gain_,
                                         support_pitch_rate_gain_,
                                         support_pitch_correction_limit_rad_);
+        ApplyPitchCaptureFootPlacementCorrection(
+            target_pose, support_pitch_target_deg_,
+            support_pitch_capture_gain_scale_ * support_capture_fade);
         ApplyCentroidalWbcTorques(elapsed, tau_ff);
       }
     } else if (runtime_phase_ == RuntimePhase::kComplete) {
@@ -1715,6 +1884,15 @@ class JumpControllerNode : public rclcpp::Node {
   double support_pitch_compactness_gain_{0.65};
   double support_pitch_rate_gain_{0.06};
   double support_pitch_correction_limit_rad_{0.18};
+  double pitch_capture_foot_delta_gain_m_per_rad_{0.035};
+  double pitch_capture_foot_delta_rate_gain_m_per_radps_{0.008};
+  double pitch_capture_foot_delta_limit_m_{0.03};
+  double pitch_capture_front_z_scale_{0.75};
+  double pitch_capture_rear_z_scale_{0.35};
+  double flight_pitch_capture_gain_scale_{0.80};
+  double landing_pitch_capture_gain_scale_{1.00};
+  double support_pitch_capture_gain_scale_{1.15};
+  double support_pitch_capture_fade_duration_s_{0.12};
   double startup_pose_tolerance_rad_{0.20};
   double startup_body_speed_tolerance_mps_{0.30};
   double startup_tilt_tolerance_deg_{20.0};

@@ -26,8 +26,9 @@
 
 1. 先读本文件，完成第一次构建和第一次单次试验。
 2. 再读 [控制链路说明](docs/control_stack.zh-CN.md)，理解运行时数据怎么流动。
-3. 接着读 [调参流程](docs/calibration_workflow.zh-CN.md)，理解怎么读报告、怎么做 sweep。
-4. 如果准备改代码或改依赖，再读 [开发流程](docs/development_workflow.zh-CN.md)。
+3. 再读 [算法说明](algorithm.md)，理解 planner、controller、WBC 各自在算什么。
+4. 接着读 [调参流程](docs/calibration_workflow.zh-CN.md)，理解怎么读报告、怎么做 sweep。
+5. 如果准备改代码或改依赖，再读 [开发流程](docs/development_workflow.zh-CN.md)。
 
 ## 项目范围
 
@@ -79,6 +80,8 @@
   保存对上游 submodule 的本地补丁。
 - `docs/`
   保存架构、调参、开发相关文档。
+- `algorithm.md`
+  说明当前前跳算法的 planner、controller 和 WBC 分工。
 
 ## 快速开始
 

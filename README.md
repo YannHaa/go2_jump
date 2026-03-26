@@ -36,8 +36,9 @@ jump that is easy to run, inspect, and iterate on.
 
 1. Read this file for setup and the first trial.
 2. Read [Control Stack](docs/control_stack.md) to understand the runtime chain.
-3. Read [Calibration Workflow](docs/calibration_workflow.md) before tuning.
-4. Read [Development Workflow](docs/development_workflow.md) before changing
+3. Read [Algorithm Notes](algorithm.md) for the current planner/controller/WBC split.
+4. Read [Calibration Workflow](docs/calibration_workflow.md) before tuning.
+5. Read [Development Workflow](docs/development_workflow.md) before changing
    submodules, patches, or the build pipeline.
 
 ## Validated Baseline
@@ -73,6 +74,8 @@ reproducible across machines.
   Local patches applied on top of upstream submodules.
 - `docs/`
   Architecture, calibration, and development documentation.
+- `algorithm.md`
+  Root-level notes on what the planner, controller, and experimental WBC layer compute.
 
 ## Quick Start
 

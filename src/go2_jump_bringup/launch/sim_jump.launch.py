@@ -103,6 +103,33 @@ def generate_launch_description():
     support_pitch_correction_limit_rad = LaunchConfiguration(
         "support_pitch_correction_limit_rad"
     )
+    pitch_capture_foot_delta_gain_m_per_rad = LaunchConfiguration(
+        "pitch_capture_foot_delta_gain_m_per_rad"
+    )
+    pitch_capture_foot_delta_rate_gain_m_per_radps = LaunchConfiguration(
+        "pitch_capture_foot_delta_rate_gain_m_per_radps"
+    )
+    pitch_capture_foot_delta_limit_m = LaunchConfiguration(
+        "pitch_capture_foot_delta_limit_m"
+    )
+    pitch_capture_front_z_scale = LaunchConfiguration(
+        "pitch_capture_front_z_scale"
+    )
+    pitch_capture_rear_z_scale = LaunchConfiguration(
+        "pitch_capture_rear_z_scale"
+    )
+    flight_pitch_capture_gain_scale = LaunchConfiguration(
+        "flight_pitch_capture_gain_scale"
+    )
+    landing_pitch_capture_gain_scale = LaunchConfiguration(
+        "landing_pitch_capture_gain_scale"
+    )
+    support_pitch_capture_gain_scale = LaunchConfiguration(
+        "support_pitch_capture_gain_scale"
+    )
+    support_pitch_capture_fade_duration_s = LaunchConfiguration(
+        "support_pitch_capture_fade_duration_s"
+    )
     crouch_forward_bias_rad = LaunchConfiguration("crouch_forward_bias_rad")
     push_forward_bias_rad = LaunchConfiguration("push_forward_bias_rad")
     push_front_compact_delta_rad = LaunchConfiguration(
@@ -265,6 +292,35 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "support_pitch_correction_limit_rad", default_value="0.18"
             ),
+            DeclareLaunchArgument(
+                "pitch_capture_foot_delta_gain_m_per_rad",
+                default_value="0.035",
+            ),
+            DeclareLaunchArgument(
+                "pitch_capture_foot_delta_rate_gain_m_per_radps",
+                default_value="0.008",
+            ),
+            DeclareLaunchArgument(
+                "pitch_capture_foot_delta_limit_m", default_value="0.03"
+            ),
+            DeclareLaunchArgument(
+                "pitch_capture_front_z_scale", default_value="0.75"
+            ),
+            DeclareLaunchArgument(
+                "pitch_capture_rear_z_scale", default_value="0.35"
+            ),
+            DeclareLaunchArgument(
+                "flight_pitch_capture_gain_scale", default_value="0.80"
+            ),
+            DeclareLaunchArgument(
+                "landing_pitch_capture_gain_scale", default_value="1.00"
+            ),
+            DeclareLaunchArgument(
+                "support_pitch_capture_gain_scale", default_value="1.15"
+            ),
+            DeclareLaunchArgument(
+                "support_pitch_capture_fade_duration_s", default_value="0.12"
+            ),
             DeclareLaunchArgument("crouch_forward_bias_rad", default_value="0.08"),
             DeclareLaunchArgument("push_forward_bias_rad", default_value="0.05"),
             DeclareLaunchArgument(
@@ -417,6 +473,15 @@ def generate_launch_description():
                         "support_pitch_compactness_gain": support_pitch_compactness_gain,
                         "support_pitch_rate_gain": support_pitch_rate_gain,
                         "support_pitch_correction_limit_rad": support_pitch_correction_limit_rad,
+                        "pitch_capture_foot_delta_gain_m_per_rad": pitch_capture_foot_delta_gain_m_per_rad,
+                        "pitch_capture_foot_delta_rate_gain_m_per_radps": pitch_capture_foot_delta_rate_gain_m_per_radps,
+                        "pitch_capture_foot_delta_limit_m": pitch_capture_foot_delta_limit_m,
+                        "pitch_capture_front_z_scale": pitch_capture_front_z_scale,
+                        "pitch_capture_rear_z_scale": pitch_capture_rear_z_scale,
+                        "flight_pitch_capture_gain_scale": flight_pitch_capture_gain_scale,
+                        "landing_pitch_capture_gain_scale": landing_pitch_capture_gain_scale,
+                        "support_pitch_capture_gain_scale": support_pitch_capture_gain_scale,
+                        "support_pitch_capture_fade_duration_s": support_pitch_capture_fade_duration_s,
                         "crouch_forward_bias_rad": crouch_forward_bias_rad,
                         "push_forward_bias_rad": push_forward_bias_rad,
                         "push_front_compact_delta_rad": push_front_compact_delta_rad,

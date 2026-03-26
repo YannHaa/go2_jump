@@ -132,6 +132,28 @@ build_jump_launch_args() {
     "${GO2_JUMP_SUPPORT_PITCH_RATE_GAIN:-}"
   append_optional_launch_arg "${array_name}" "support_pitch_correction_limit_rad" \
     "${GO2_JUMP_SUPPORT_PITCH_CORRECTION_LIMIT_RAD:-}"
+  append_optional_launch_arg "${array_name}" \
+    "pitch_capture_foot_delta_gain_m_per_rad" \
+    "${GO2_JUMP_PITCH_CAPTURE_FOOT_DELTA_GAIN_M_PER_RAD:-}"
+  append_optional_launch_arg "${array_name}" \
+    "pitch_capture_foot_delta_rate_gain_m_per_radps" \
+    "${GO2_JUMP_PITCH_CAPTURE_FOOT_DELTA_RATE_GAIN_M_PER_RADPS:-}"
+  append_optional_launch_arg "${array_name}" \
+    "pitch_capture_foot_delta_limit_m" \
+    "${GO2_JUMP_PITCH_CAPTURE_FOOT_DELTA_LIMIT_M:-}"
+  append_optional_launch_arg "${array_name}" "pitch_capture_front_z_scale" \
+    "${GO2_JUMP_PITCH_CAPTURE_FRONT_Z_SCALE:-}"
+  append_optional_launch_arg "${array_name}" "pitch_capture_rear_z_scale" \
+    "${GO2_JUMP_PITCH_CAPTURE_REAR_Z_SCALE:-}"
+  append_optional_launch_arg "${array_name}" "flight_pitch_capture_gain_scale" \
+    "${GO2_JUMP_FLIGHT_PITCH_CAPTURE_GAIN_SCALE:-}"
+  append_optional_launch_arg "${array_name}" "landing_pitch_capture_gain_scale" \
+    "${GO2_JUMP_LANDING_PITCH_CAPTURE_GAIN_SCALE:-}"
+  append_optional_launch_arg "${array_name}" "support_pitch_capture_gain_scale" \
+    "${GO2_JUMP_SUPPORT_PITCH_CAPTURE_GAIN_SCALE:-}"
+  append_optional_launch_arg "${array_name}" \
+    "support_pitch_capture_fade_duration_s" \
+    "${GO2_JUMP_SUPPORT_PITCH_CAPTURE_FADE_DURATION_S:-}"
   append_optional_launch_arg "${array_name}" "crouch_forward_bias_rad" \
     "${GO2_JUMP_CROUCH_FORWARD_BIAS_RAD:-}"
   append_optional_launch_arg "${array_name}" "push_forward_bias_rad" \

@@ -103,6 +103,15 @@ go2_jump_controller:
     support_pitch_compactness_gain: 0.65
     support_pitch_rate_gain: 0.06
     support_pitch_correction_limit_rad: 0.18
+    pitch_capture_foot_delta_gain_m_per_rad: 0.035
+    pitch_capture_foot_delta_rate_gain_m_per_radps: 0.008
+    pitch_capture_foot_delta_limit_m: 0.03
+    pitch_capture_front_z_scale: 0.75
+    pitch_capture_rear_z_scale: 0.35
+    flight_pitch_capture_gain_scale: 0.80
+    landing_pitch_capture_gain_scale: 1.00
+    support_pitch_capture_gain_scale: 1.15
+    support_pitch_capture_fade_duration_s: 0.12
 
     stand_hip_rad: 0.00571868
     stand_thigh_rad: 0.608813
