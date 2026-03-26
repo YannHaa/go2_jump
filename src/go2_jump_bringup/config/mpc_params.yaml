@@ -26,8 +26,15 @@ go2_jump_mpc_node:
     auto_start: true
     enable_lowcmd_output: false
     solver_backend: reference_preview
+    native_backend_update_interval_s: 0.04
+    auto_start_require_full_contact: true
+    auto_start_stance_dwell_s: 0.15
+    auto_start_max_planar_speed_mps: 0.20
+    auto_start_max_vertical_speed_mps: 0.12
     default_kp: 42.0
     default_kd: 4.5
+    push_kp: 26.0
+    push_kd: 2.8
     flight_kp: 22.0
     flight_kd: 2.5
     landing_kp: 58.0
@@ -42,7 +49,11 @@ go2_jump_mpc_node:
     min_contact_signal_force_n: 1.0
     flight_contact_count_max: 1
     touchdown_contact_count_threshold: 2
+    late_takeoff_window_s: 0.30
     min_flight_time_before_touchdown_s: 0.03
+    takeoff_latch_dwell_s: 0.02
+    touchdown_latch_dwell_s: 0.02
+    settle_latch_dwell_s: 0.04
     settle_vertical_velocity_threshold_mps: 0.20
     mujoco_model_path: /workspace/src/unitree_mujoco/unitree_robots/go2/scene.xml
     mujoco_rollout_steps: 18

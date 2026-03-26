@@ -50,14 +50,15 @@ Verified:
 - headless `unitree_mujoco` now steps correctly and publishes non-zero `/lowstate`
 - `/lowstate` carries non-zero joint state, IMU state, and tick progression
 - `foot_force` / `foot_force_est` are no longer transport placeholders; during active low-level control they now reflect MuJoCo contact-derived support loads
-- `go2_jump_mpc` publishes `/lowcmd` at about `200 Hz`
+- `go2_jump_mpc` publishes `/lowcmd` through the real low-level command path; with the current native backend configuration the observed publication rate is typically in the `80-100 Hz` range
 - `reference_preview` remains the stable baseline backend
 - `mujoco_native_mpc` is integrated, builds cleanly, launches, and drives the same low-level command path
+- repeatable single-trial reports can be generated directly from the Docker workflow and are written to `reports/trials/`
 
 Current limitation:
 
 - `mujoco_native_mpc` is not yet a high-quality forward jump controller
-- the backend can produce meaningful contact-aware commands, but its takeoff timing and phase alignment still need work before it becomes a clean airborne-dominant jump policy
+- the backend can now produce cleaner airborne-dominant motion than the earlier template baseline, but distance tracking is still below target and run-to-run consistency still needs work
 
 In other words, the project is past bring-up, but still in controller-development
 mode rather than benchmark-ready mode.
@@ -106,6 +107,15 @@ GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 ./scripts/docker_smoke_test_stack.sh 0.25
 ```
 
+Run one instrumented trial and save a report:
+
+```bash
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+The script writes `summary.json`, `stack.log`, `sim.log`, and `recorder.log`
+under `reports/trials/<timestamp>_d<distance>_mujoco_native_mpc/`.
+
 ## Recommended Reading Order
 
 1. Read this file for the repository entrypoints and current status.
@@ -119,3 +129,4 @@ GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 - `reference_preview` is still the safest backend when the goal is transport and interface validation.
 - `mujoco_native_mpc` is the active development path.
 - The most useful debug topics today are `/lowstate`, `/lowcmd`, and `/go2_jump/controller_state`.
+- For controller tuning, prefer `./scripts/docker_run_single_jump_trial.sh <distance>` over ad-hoc `ros2 topic echo`, because it records phase order, airborne displacement, and lowcmd rate in one place.

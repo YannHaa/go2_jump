@@ -47,14 +47,15 @@
 - headless `unitree_mujoco` 现在能够正常推进并发布非零 `/lowstate`
 - `/lowstate` 已经包含非零关节状态、IMU 状态和持续增长的 tick
 - `foot_force` / `foot_force_est` 不再是占位量；在低层控制运行时，它们会反映基于 MuJoCo 接触解算得到的支撑载荷
-- `go2_jump_mpc` 能以约 `200 Hz` 发布 `/lowcmd`
+- `go2_jump_mpc` 已经走通真实低层控制链路；在当前 native backend 配置下，`/lowcmd` 实测通常在 `80-100 Hz` 区间
 - `reference_preview` 仍然是当前最稳定的基线 backend
 - `mujoco_native_mpc` 已经接入、可编译、可启动，并且走通了同一条低层控制链路
+- 已经可以直接从 Docker 流程生成单次试跳报告，输出保存在 `reports/trials/`
 
 当前限制：
 
 - `mujoco_native_mpc` 还不能算高质量前跳控制器
-- 它已经能生成有接触语义的低层命令，但起跳时机和阶段对齐还需要继续打磨，离“主要靠腾空完成前移的干净前跳”还有距离
+- 它已经能比早期模板式方案生成更干净的腾空前移，但距离跟踪仍明显低于目标值，而且不同试次之间的一致性还需要继续打磨
 
 也就是说，这个项目已经过了单纯的 bring-up 阶段，但现在仍然处在控制器迭代阶段，
 还不是最终的 benchmark 版本。
@@ -103,6 +104,15 @@ GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 ./scripts/docker_smoke_test_stack.sh 0.25
 ```
 
+运行一次带自动记录的单次试跳：
+
+```bash
+./scripts/docker_run_single_jump_trial.sh 0.25
+```
+
+脚本会在 `reports/trials/<timestamp>_d<distance>_mujoco_native_mpc/` 下生成
+`summary.json`、`stack.log`、`sim.log` 和 `recorder.log`。
+
 ## 建议阅读顺序
 
 1. 先读本文件，建立对仓库入口和当前状态的整体认识。
@@ -116,3 +126,4 @@ GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 - 如果目标是验证接口链路和传输稳定性，优先使用 `reference_preview`。
 - 如果目标是继续开发主控制器，使用 `mujoco_native_mpc`。
 - 目前最有价值的调试话题是 `/lowstate`、`/lowcmd` 和 `/go2_jump/controller_state`。
+- 如果目标是调控制器，优先使用 `./scripts/docker_run_single_jump_trial.sh <distance>`，因为它会把阶段序列、腾空位移和 lowcmd 频率一起记录下来。

@@ -20,6 +20,10 @@ namespace {
 
 constexpr double kRadToDeg = 57.29577951308232;
 
+bool IsNativeBackend(const std::string& backend_name) {
+  return backend_name == "mujoco_native_mpc" || backend_name == "mujoco_sampling";
+}
+
 template <std::size_t N>
 std::array<double, N> ReadPoseParameter(rclcpp::Node& node, const std::string& name,
                                         const std::array<double, N>& defaults) {
@@ -103,8 +107,24 @@ class WholeBodyMpcNode : public rclcpp::Node {
     config_.auto_start = declare_parameter("auto_start", config_.auto_start);
     config_.solver_backend =
         declare_parameter("solver_backend", config_.solver_backend);
+    config_.native_backend_update_interval_s = declare_parameter(
+        "native_backend_update_interval_s",
+        config_.native_backend_update_interval_s);
+    config_.auto_start_require_full_contact = declare_parameter(
+        "auto_start_require_full_contact",
+        config_.auto_start_require_full_contact);
+    config_.auto_start_stance_dwell_s = declare_parameter(
+        "auto_start_stance_dwell_s", config_.auto_start_stance_dwell_s);
+    config_.auto_start_max_planar_speed_mps = declare_parameter(
+        "auto_start_max_planar_speed_mps",
+        config_.auto_start_max_planar_speed_mps);
+    config_.auto_start_max_vertical_speed_mps = declare_parameter(
+        "auto_start_max_vertical_speed_mps",
+        config_.auto_start_max_vertical_speed_mps);
     config_.default_kp = declare_parameter("default_kp", config_.default_kp);
     config_.default_kd = declare_parameter("default_kd", config_.default_kd);
+    config_.push_kp = declare_parameter("push_kp", config_.push_kp);
+    config_.push_kd = declare_parameter("push_kd", config_.push_kd);
     config_.flight_kp = declare_parameter("flight_kp", config_.flight_kp);
     config_.flight_kd = declare_parameter("flight_kd", config_.flight_kd);
     config_.landing_kp = declare_parameter("landing_kp", config_.landing_kp);
@@ -128,9 +148,17 @@ class WholeBodyMpcNode : public rclcpp::Node {
     config_.touchdown_contact_count_threshold = declare_parameter(
         "touchdown_contact_count_threshold",
         config_.touchdown_contact_count_threshold);
+    config_.late_takeoff_window_s = declare_parameter(
+        "late_takeoff_window_s", config_.late_takeoff_window_s);
     config_.min_flight_time_before_touchdown_s = declare_parameter(
         "min_flight_time_before_touchdown_s",
         config_.min_flight_time_before_touchdown_s);
+    config_.takeoff_latch_dwell_s = declare_parameter(
+        "takeoff_latch_dwell_s", config_.takeoff_latch_dwell_s);
+    config_.touchdown_latch_dwell_s = declare_parameter(
+        "touchdown_latch_dwell_s", config_.touchdown_latch_dwell_s);
+    config_.settle_latch_dwell_s = declare_parameter(
+        "settle_latch_dwell_s", config_.settle_latch_dwell_s);
     config_.settle_vertical_velocity_threshold_mps = declare_parameter(
         "settle_vertical_velocity_threshold_mps",
         config_.settle_vertical_velocity_threshold_mps);
@@ -218,7 +246,9 @@ class WholeBodyMpcNode : public rclcpp::Node {
     have_task_ = true;
     if (task_changed) {
       task_started_ = false;
+      stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
       last_phase_name_.clear();
+      have_cached_command_ = false;
       RCLCPP_INFO(
           get_logger(),
           "Received JumpTask task_id=%s distance=%.3f takeoff_speed=%.3f flight=%.3f",
@@ -294,6 +324,35 @@ class WholeBodyMpcNode : public rclcpp::Node {
     if (!have_task_ || !config_.auto_start || task_started_) {
       return;
     }
+    if (!observation_.lowstate_received || !observation_.sportstate_received) {
+      return;
+    }
+
+    const int contact_count = static_cast<int>(std::count(
+        observation_.foot_contact.begin(), observation_.foot_contact.end(), true));
+    const double planar_speed =
+        std::hypot(observation_.body_velocity[0], observation_.body_velocity[1]);
+    const bool stance_ready =
+        (!config_.auto_start_require_full_contact || contact_count == 4) &&
+        planar_speed <= config_.auto_start_max_planar_speed_mps &&
+        std::abs(observation_.body_velocity[2]) <=
+            config_.auto_start_max_vertical_speed_mps;
+
+    if (!stance_ready) {
+      stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+      return;
+    }
+
+    if (stance_ready_since_.nanoseconds() == 0) {
+      stance_ready_since_ = now();
+      return;
+    }
+
+    if ((now() - stance_ready_since_).seconds() <
+        config_.auto_start_stance_dwell_s) {
+      return;
+    }
+
     task_started_ = true;
     task_start_time_ = now();
     RCLCPP_INFO(get_logger(), "Starting MPC task execution.");
@@ -309,7 +368,20 @@ class WholeBodyMpcNode : public rclcpp::Node {
     }
 
     const double task_elapsed_s = (now() - task_start_time_).seconds();
-    const auto command = controller_->Solve(observation_, task_elapsed_s);
+    const bool should_refresh_command =
+        !have_cached_command_ || !IsNativeBackend(config_.solver_backend) ||
+        (now() - last_solve_time_).seconds() >=
+            config_.native_backend_update_interval_s;
+    if (should_refresh_command) {
+      cached_command_ = controller_->Solve(observation_, task_elapsed_s);
+      if (!cached_command_.valid) {
+        return;
+      }
+      have_cached_command_ = true;
+      last_solve_time_ = now();
+    }
+
+    const auto& command = cached_command_;
     if (!command.valid) {
       return;
     }
@@ -351,11 +423,15 @@ class WholeBodyMpcNode : public rclcpp::Node {
   std::array<double, 4> filtered_contact_force_{};
   std::array<bool, 4> pending_contact_state_{};
   std::array<int, 4> pending_contact_ticks_{};
+  go2_jump_mpc::WholeBodyMpcCommand cached_command_{};
+  bool have_cached_command_{false};
   go2_jump_core::JumpTaskSpec active_task_{};
   bool have_task_{false};
   bool task_started_{false};
   std::string last_phase_name_;
   rclcpp::Time task_start_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_solve_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time stance_ready_since_{0, 0, RCL_ROS_TIME};
   unitree_go::msg::LowCmd low_cmd_template_{};
   std::unique_ptr<go2_jump_mpc::WholeBodyMpc> controller_;
 

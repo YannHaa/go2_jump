@@ -37,6 +37,19 @@ struct PreviewStep {
   double landing_brace_factor{0.0};
 };
 
+struct PhaseEventState {
+  bool contact_signal_valid{false};
+  bool takeoff_latched{false};
+  bool touchdown_latched{false};
+  bool settle_latched{false};
+  double takeoff_time_s{-1.0};
+  double touchdown_time_s{-1.0};
+  double settle_time_s{-1.0};
+  double takeoff_candidate_start_s{-1.0};
+  double touchdown_candidate_start_s{-1.0};
+  double settle_candidate_start_s{-1.0};
+};
+
 struct WholeBodyMpcCommand {
   bool valid{false};
   bool backend_ready{false};
@@ -65,9 +78,16 @@ struct WholeBodyMpcConfig {
   bool enable_lowcmd_output{false};
   bool auto_start{true};
   std::string solver_backend{"reference_preview"};
+  double native_backend_update_interval_s{0.03};
+  bool auto_start_require_full_contact{true};
+  double auto_start_stance_dwell_s{0.15};
+  double auto_start_max_planar_speed_mps{0.20};
+  double auto_start_max_vertical_speed_mps{0.12};
 
   double default_kp{42.0};
   double default_kd{4.5};
+  double push_kp{26.0};
+  double push_kd{2.8};
   double flight_kp{22.0};
   double flight_kd{2.5};
   double landing_kp{58.0};
@@ -82,7 +102,11 @@ struct WholeBodyMpcConfig {
   double min_contact_signal_force_n{1.0};
   int flight_contact_count_max{1};
   int touchdown_contact_count_threshold{2};
+  double late_takeoff_window_s{0.30};
   double min_flight_time_before_touchdown_s{0.03};
+  double takeoff_latch_dwell_s{0.02};
+  double touchdown_latch_dwell_s{0.02};
+  double settle_latch_dwell_s{0.04};
   double settle_vertical_velocity_threshold_mps{0.20};
   std::string mujoco_model_path{};
   int mujoco_rollout_steps{18};
@@ -131,7 +155,7 @@ class WholeBodyMpc {
   struct MujocoBackend;
 
   WholeBodyMpcCommand SolveReferencePreview(const RobotObservation& observation,
-                                            double task_elapsed_s) const;
+                                            double task_elapsed_s);
   WholeBodyMpcCommand SolveMujocoSampling(const RobotObservation& observation,
                                           double task_elapsed_s);
   std::array<double, kControlledJointCount> BuildPoseForSample(
@@ -140,20 +164,24 @@ class WholeBodyMpc {
       const go2_jump_core::JumpTaskSpec& task,
       const go2_jump_core::JumpReferenceSample& sample) const;
   double GainsForPhase(go2_jump_core::JumpPhase phase, bool derivative) const;
+  PhaseEventState BuildExecutionPhaseEventState(
+      const RobotObservation& observation, double task_elapsed_s);
+  void UpdatePhaseEventState(PhaseEventState& state, int contact_count,
+                             bool contact_signal_valid,
+                             double body_vertical_velocity_mps,
+                             double task_elapsed_s) const;
   go2_jump_core::JumpReferenceSample ApplyContactOverrides(
       const go2_jump_core::JumpReferenceSample& planned_sample,
-      const RobotObservation& observation,
-      double task_elapsed_s) const;
+      const RobotObservation& observation, double task_elapsed_s);
   go2_jump_core::JumpReferenceSample ApplyContactOverrides(
       const go2_jump_core::JumpReferenceSample& planned_sample,
-      int contact_count,
-      bool contact_signal_valid,
-      double body_vertical_velocity_mps,
-      double task_elapsed_s) const;
+      const PhaseEventState& state, int contact_count,
+      double body_vertical_velocity_mps, double task_elapsed_s) const;
 
   WholeBodyMpcConfig config_;
   go2_jump_core::JumpTaskSpec task_{};
   bool have_task_{false};
+  PhaseEventState execution_phase_state_{};
   std::unique_ptr<MujocoBackend> mujoco_backend_;
 };
 

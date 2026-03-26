@@ -73,6 +73,11 @@ double Lerp(double a, double b, double alpha) {
   return a + (b - a) * Clamp(alpha, 0.0, 1.0);
 }
 
+double Smooth01(double value) {
+  const double x = Clamp(value, 0.0, 1.0);
+  return x * x * (3.0 - 2.0 * x);
+}
+
 JointArray BlendPose(const JointArray& a, const JointArray& b, double alpha) {
   JointArray out{};
   for (std::size_t i = 0; i < out.size(); ++i) {
@@ -154,6 +159,10 @@ std::vector<CandidateAction> CandidateActionsForPhase(
       {0.0, 0.0, -1.0, 0.0},
       {0.0, 0.0, 0.0, 1.0},
       {0.0, 0.0, 0.0, 1.4},
+      {0.8, 1.6, 0.0, 0.0},
+      {0.8, -1.6, 0.0, 0.0},
+      {1.6, 1.4, 0.0, 0.0},
+      {1.6, -1.4, 0.0, 0.0},
   };
 
   if (phase == go2_jump_core::JumpPhase::kFlight) {
@@ -176,12 +185,18 @@ std::vector<CandidateAction> CandidateActionsForPhase(
 
 go2_jump_core::JumpReferenceSample ApplyCandidateToSample(
     go2_jump_core::JumpReferenceSample sample, const CandidateAction& action) {
-  if (sample.phase == go2_jump_core::JumpPhase::kPush) {
-    sample.desired_body_pitch_deg += 5.0 * action.pitch_adjust_scale;
-    sample.desired_forward_velocity_mps *= 1.0 + 0.09 * action.push_extension_scale;
-    sample.desired_vertical_velocity_mps *= 1.0 + 0.10 * action.push_extension_scale;
+  if (sample.phase == go2_jump_core::JumpPhase::kCrouch) {
+    sample.desired_body_pitch_deg += 2.0 * action.pitch_adjust_scale;
+  } else if (sample.phase == go2_jump_core::JumpPhase::kPush) {
+    sample.desired_body_pitch_deg += 6.5 * action.pitch_adjust_scale;
+    sample.desired_forward_velocity_mps *=
+        1.0 + 0.10 * action.push_extension_scale +
+        0.10 * action.pitch_adjust_scale;
+    sample.desired_vertical_velocity_mps *=
+        1.0 + 0.12 * action.push_extension_scale -
+        0.03 * std::abs(action.pitch_adjust_scale);
   } else if (sample.phase == go2_jump_core::JumpPhase::kFlight) {
-    sample.desired_body_pitch_deg += 2.5 * action.pitch_adjust_scale;
+    sample.desired_body_pitch_deg += 3.0 * action.pitch_adjust_scale;
     sample.leg_retraction_ratio = Clamp(
         sample.leg_retraction_ratio + 0.22 * action.flight_tuck_scale, 0.0, 1.0);
     sample.landing_brace_factor = Clamp(
@@ -199,6 +214,8 @@ JointArray ApplyCandidateToPose(const JointArray& nominal_pose,
                                 const go2_jump_core::JumpReferenceSample& sample,
                                 const CandidateAction& action) {
   JointArray pose = nominal_pose;
+  const double forward_scale = Clamp(
+      std::abs(sample.desired_forward_velocity_mps) / 1.2, 0.5, 1.8);
 
   auto apply_leg_delta = [&pose](std::size_t thigh_idx, std::size_t calf_idx,
                                  double thigh_delta, double calf_delta) {
@@ -206,12 +223,37 @@ JointArray ApplyCandidateToPose(const JointArray& nominal_pose,
     pose[calf_idx] += calf_delta;
   };
 
-  if (sample.phase == go2_jump_core::JumpPhase::kPush) {
+  if (sample.phase == go2_jump_core::JumpPhase::kCrouch) {
+    const double front_thigh_delta = -0.04 * action.pitch_adjust_scale * forward_scale;
+    const double front_calf_delta = 0.08 * action.pitch_adjust_scale * forward_scale;
+    const double rear_thigh_delta = 0.07 * action.pitch_adjust_scale * forward_scale;
+    const double rear_calf_delta = -0.12 * action.pitch_adjust_scale * forward_scale;
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, front_thigh_delta, front_calf_delta);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, rear_thigh_delta, rear_calf_delta);
+    }
+  } else if (sample.phase == go2_jump_core::JumpPhase::kPush) {
     const double thigh_delta = -0.12 * action.push_extension_scale;
     const double calf_delta = 0.24 * action.push_extension_scale;
     for (std::size_t thigh_idx : {1u, 4u, 7u, 10u}) {
       const std::size_t calf_idx = thigh_idx + 1;
       apply_leg_delta(thigh_idx, calf_idx, thigh_delta, calf_delta);
+    }
+    const double front_thigh_bias =
+        0.08 * action.pitch_adjust_scale * forward_scale;
+    const double front_calf_bias =
+        -0.12 * action.pitch_adjust_scale * forward_scale;
+    const double rear_thigh_bias =
+        -0.12 * action.pitch_adjust_scale * forward_scale;
+    const double rear_calf_bias =
+        0.20 * action.pitch_adjust_scale * forward_scale;
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, front_thigh_bias, front_calf_bias);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, rear_thigh_bias, rear_calf_bias);
     }
   } else if (sample.phase == go2_jump_core::JumpPhase::kFlight) {
     const double thigh_delta = 0.14 * action.flight_tuck_scale;
@@ -219,6 +261,20 @@ JointArray ApplyCandidateToPose(const JointArray& nominal_pose,
     for (std::size_t thigh_idx : {1u, 4u, 7u, 10u}) {
       const std::size_t calf_idx = thigh_idx + 1;
       apply_leg_delta(thigh_idx, calf_idx, thigh_delta, calf_delta);
+    }
+    const double front_thigh_bias =
+        -0.04 * action.pitch_adjust_scale * forward_scale;
+    const double front_calf_bias =
+        0.06 * action.pitch_adjust_scale * forward_scale;
+    const double rear_thigh_bias =
+        0.04 * action.pitch_adjust_scale * forward_scale;
+    const double rear_calf_bias =
+        -0.06 * action.pitch_adjust_scale * forward_scale;
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, front_thigh_bias, front_calf_bias);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, rear_thigh_bias, rear_calf_bias);
     }
   } else if (sample.phase == go2_jump_core::JumpPhase::kLanding ||
              sample.phase == go2_jump_core::JumpPhase::kSettle) {
@@ -238,6 +294,8 @@ JointArray ApplyCandidateToFeedforward(const JointArray& nominal_tau,
                                        const CandidateAction& action,
                                        double max_feedforward_torque_nm) {
   JointArray tau = nominal_tau;
+  const double forward_scale = Clamp(
+      std::abs(sample.desired_forward_velocity_mps) / 1.2, 0.5, 1.8);
 
   if (sample.phase == go2_jump_core::JumpPhase::kPush) {
     const double thigh_delta =
@@ -252,6 +310,34 @@ JointArray ApplyCandidateToFeedforward(const JointArray& nominal_tau,
     }
     for (std::size_t idx : {2u, 5u, 8u, 11u}) {
       tau[idx] = Clamp(tau[idx] + calf_delta, -max_feedforward_torque_nm,
+                       max_feedforward_torque_nm);
+    }
+    const double front_thigh_bias =
+        Clamp(-1.2 * action.pitch_adjust_scale * forward_scale,
+              -max_feedforward_torque_nm, max_feedforward_torque_nm);
+    const double front_calf_bias =
+        Clamp(-2.0 * action.pitch_adjust_scale * forward_scale,
+              -max_feedforward_torque_nm, max_feedforward_torque_nm);
+    const double rear_thigh_bias =
+        Clamp(2.2 * action.pitch_adjust_scale * forward_scale,
+              -max_feedforward_torque_nm, max_feedforward_torque_nm);
+    const double rear_calf_bias =
+        Clamp(3.4 * action.pitch_adjust_scale * forward_scale,
+              -max_feedforward_torque_nm, max_feedforward_torque_nm);
+    for (std::size_t idx : {1u, 4u}) {
+      tau[idx] = Clamp(tau[idx] + front_thigh_bias, -max_feedforward_torque_nm,
+                       max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {2u, 5u}) {
+      tau[idx] = Clamp(tau[idx] + front_calf_bias, -max_feedforward_torque_nm,
+                       max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {7u, 10u}) {
+      tau[idx] = Clamp(tau[idx] + rear_thigh_bias, -max_feedforward_torque_nm,
+                       max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {8u, 11u}) {
+      tau[idx] = Clamp(tau[idx] + rear_calf_bias, -max_feedforward_torque_nm,
                        max_feedforward_torque_nm);
     }
   } else if (sample.phase == go2_jump_core::JumpPhase::kLanding) {
@@ -513,9 +599,99 @@ WholeBodyMpc::~WholeBodyMpc() = default;
 void WholeBodyMpc::SetTask(const go2_jump_core::JumpTaskSpec& task) {
   task_ = task;
   have_task_ = true;
+  execution_phase_state_ = {};
 }
 
 bool WholeBodyMpc::HasTask() const { return have_task_; }
+
+PhaseEventState WholeBodyMpc::BuildExecutionPhaseEventState(
+    const RobotObservation& observation, double task_elapsed_s) {
+  const int contact_count = CountContacts(observation.foot_contact);
+  UpdatePhaseEventState(execution_phase_state_, contact_count,
+                        observation.contact_signal_valid,
+                        observation.body_velocity[2], task_elapsed_s);
+  return execution_phase_state_;
+}
+
+void WholeBodyMpc::UpdatePhaseEventState(PhaseEventState& state, int contact_count,
+                                         bool contact_signal_valid,
+                                         double body_vertical_velocity_mps,
+                                         double task_elapsed_s) const {
+  state.contact_signal_valid = state.contact_signal_valid || contact_signal_valid;
+  if (!state.contact_signal_valid) {
+    return;
+  }
+
+  const double takeoff_gate_time_s =
+      task_.crouch_duration_s + 0.30 * task_.push_duration_s;
+  const bool takeoff_candidate =
+      task_elapsed_s >= takeoff_gate_time_s &&
+      contact_count <= config_.flight_contact_count_max;
+  if (!state.takeoff_latched) {
+    if (takeoff_candidate) {
+      if (state.takeoff_candidate_start_s < 0.0) {
+        state.takeoff_candidate_start_s = task_elapsed_s;
+      }
+      if (task_elapsed_s - state.takeoff_candidate_start_s >=
+          config_.takeoff_latch_dwell_s) {
+        state.takeoff_latched = true;
+        state.takeoff_time_s = state.takeoff_candidate_start_s;
+      }
+    } else {
+      state.takeoff_candidate_start_s = -1.0;
+    }
+  }
+  if (state.takeoff_latched && state.takeoff_time_s >= 0.0) {
+    state.takeoff_candidate_start_s = state.takeoff_time_s;
+  }
+
+  if (state.takeoff_latched && !state.touchdown_latched) {
+    const double flight_elapsed_s = task_elapsed_s - state.takeoff_time_s;
+    const bool touchdown_candidate =
+        flight_elapsed_s >= config_.min_flight_time_before_touchdown_s &&
+        contact_count >= config_.touchdown_contact_count_threshold &&
+        (body_vertical_velocity_mps <= 0.35 || contact_count == 4);
+    if (touchdown_candidate) {
+      if (state.touchdown_candidate_start_s < 0.0) {
+        state.touchdown_candidate_start_s = task_elapsed_s;
+      }
+      if (task_elapsed_s - state.touchdown_candidate_start_s >=
+          config_.touchdown_latch_dwell_s) {
+        state.touchdown_latched = true;
+        state.touchdown_time_s = state.touchdown_candidate_start_s;
+      }
+    } else {
+      state.touchdown_candidate_start_s = -1.0;
+    }
+  }
+  if (state.touchdown_latched && state.touchdown_time_s >= 0.0) {
+    state.touchdown_candidate_start_s = state.touchdown_time_s;
+  }
+
+  if (state.touchdown_latched && !state.settle_latched) {
+    const double touchdown_elapsed_s = task_elapsed_s - state.touchdown_time_s;
+    const bool settle_candidate =
+        contact_count == 4 &&
+        std::abs(body_vertical_velocity_mps) <=
+            config_.settle_vertical_velocity_threshold_mps &&
+        touchdown_elapsed_s >= 0.5 * task_.landing_duration_s;
+    if (settle_candidate) {
+      if (state.settle_candidate_start_s < 0.0) {
+        state.settle_candidate_start_s = task_elapsed_s;
+      }
+      if (task_elapsed_s - state.settle_candidate_start_s >=
+          config_.settle_latch_dwell_s) {
+        state.settle_latched = true;
+        state.settle_time_s = state.settle_candidate_start_s;
+      }
+    } else {
+      state.settle_candidate_start_s = -1.0;
+    }
+  }
+  if (state.settle_latched && state.settle_time_s >= 0.0) {
+    state.settle_candidate_start_s = state.settle_time_s;
+  }
+}
 
 WholeBodyMpcCommand WholeBodyMpc::Solve(const RobotObservation& observation,
                                         double task_elapsed_s) {
@@ -533,7 +709,7 @@ WholeBodyMpcCommand WholeBodyMpc::Solve(const RobotObservation& observation,
 }
 
 WholeBodyMpcCommand WholeBodyMpc::SolveReferencePreview(
-    const RobotObservation& observation, double task_elapsed_s) const {
+    const RobotObservation& observation, double task_elapsed_s) {
   WholeBodyMpcCommand command{};
   if (!have_task_ || !observation.lowstate_received) {
     return command;
@@ -547,10 +723,13 @@ WholeBodyMpcCommand WholeBodyMpc::SolveReferencePreview(
   command.foot_contact = observation.foot_contact;
   command.contact_count = CountContacts(observation.foot_contact);
 
+  const auto phase_state =
+      BuildExecutionPhaseEventState(observation, task_elapsed_s);
   const auto planned_sample = go2_jump_core::SampleJumpReference(
       task_, config_.reference_config, task_elapsed_s);
   const auto current_sample =
-      ApplyContactOverrides(planned_sample, observation, task_elapsed_s);
+      ApplyContactOverrides(planned_sample, phase_state, command.contact_count,
+                            observation.body_velocity[2], task_elapsed_s);
   command.contact_override = (current_sample.phase != planned_sample.phase);
   command.phase = current_sample.phase;
   command.desired_forward_velocity_mps =
@@ -617,11 +796,17 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
   const double push_end = task_.crouch_duration_s + task_.push_duration_s;
   const double x_start = backend.data->qpos[0];
 
-  RolloutResult best_result;
+  auto rollout_phase_state = execution_phase_state_;
   const auto seed_contact = backend.FootContacts(config_.contact_release_threshold_n);
+  UpdatePhaseEventState(rollout_phase_state, CountContacts(seed_contact),
+                        rollout_phase_state.contact_signal_valid,
+                        backend.data->qvel[2], task_elapsed_s);
+
+  RolloutResult best_result;
   const auto seed_sample = ApplyContactOverrides(
       go2_jump_core::SampleJumpReference(task_, config_.reference_config, task_elapsed_s),
-      CountContacts(seed_contact), true, backend.data->qvel[2], task_elapsed_s);
+      rollout_phase_state, CountContacts(seed_contact), backend.data->qvel[2],
+      task_elapsed_s);
 
   for (const auto& candidate : CandidateActionsForPhase(seed_sample.phase)) {
     std::memcpy(backend.data->qpos, qpos_start.data(),
@@ -635,6 +820,7 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
     double score = 0.0;
     double target_dx = 0.0;
     double accumulated_control_energy = 0.0;
+    auto candidate_phase_state = rollout_phase_state;
 
     for (int step = 0; step < rollout_steps; ++step) {
       const double current_time = task_elapsed_s + step * rollout_dt;
@@ -644,8 +830,8 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
           backend.FootContacts(config_.contact_release_threshold_n);
       const int predicted_contact_count = CountContacts(predicted_contact);
       const auto contact_adjusted_sample = ApplyContactOverrides(
-          planned_sample, predicted_contact_count, true, backend.data->qvel[2],
-          current_time);
+          planned_sample, candidate_phase_state, predicted_contact_count,
+          backend.data->qvel[2], current_time);
       const auto sampled_reference =
           ApplyCandidateToSample(contact_adjusted_sample, candidate);
       const auto nominal_q_ref = BuildPoseForSample(sampled_reference);
@@ -696,6 +882,10 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
       const double ballistic_vz =
           task_.target_takeoff_velocity_z_mps - gravity_mps2 * ballistic_time_s;
 
+      UpdatePhaseEventState(candidate_phase_state, next_contact_count,
+                            candidate_phase_state.contact_signal_valid, vz,
+                            next_time);
+
       target_dx += sampled_reference.desired_forward_velocity_mps * rollout_dt;
 
       switch (sampled_reference.phase) {
@@ -708,13 +898,13 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
           }
           break;
         case go2_jump_core::JumpPhase::kPush: {
-          score += 0.14 * Square(vx - sampled_reference.desired_forward_velocity_mps);
+          score += 0.28 * Square(vx - sampled_reference.desired_forward_velocity_mps);
           score += 0.16 * Square(vz - sampled_reference.desired_vertical_velocity_mps);
           score += 0.05 * Square(pitch_deg - sampled_reference.desired_body_pitch_deg);
           const double push_progress = Clamp(
               sampled_reference.time_in_phase_s / std::max(task_.push_duration_s, 1e-6),
               0.0, 1.0);
-          score += 0.10 * push_progress *
+          score += 0.18 * push_progress *
                    Square(vx - task_.target_takeoff_velocity_x_mps);
           score += 0.14 * push_progress *
                    Square(vz - task_.target_takeoff_velocity_z_mps);
@@ -730,7 +920,7 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
         }
         case go2_jump_core::JumpPhase::kFlight:
           score += 14.0 * next_contact_count;
-          score += 0.10 * Square(vx - task_.target_takeoff_velocity_x_mps);
+          score += 0.24 * Square(vx - task_.target_takeoff_velocity_x_mps);
           score += 0.12 * Square(vz - ballistic_vz);
           score += 0.05 * Square(pitch_deg - sampled_reference.desired_body_pitch_deg);
           score += 0.02 * Square(roll_deg);
@@ -766,7 +956,7 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
     const auto end_reference = ApplyContactOverrides(
         go2_jump_core::SampleJumpReference(
             task_, config_.reference_config, horizon_end_time),
-        end_contact_count, true, end_vz, horizon_end_time);
+        candidate_phase_state, end_contact_count, end_vz, horizon_end_time);
     const double target_end_vx = (end_reference.phase == go2_jump_core::JumpPhase::kFlight)
                                      ? task_.target_takeoff_velocity_x_mps
                                      : end_reference.desired_forward_velocity_mps;
@@ -775,8 +965,8 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
                                         gravity_mps2 *
                                             std::max(0.0, horizon_end_time - push_end))
                                      : end_reference.desired_vertical_velocity_mps;
-    score += 0.90 * Square(end_dx - target_dx);
-    score += 0.35 * Square(end_vx - target_end_vx);
+    score += 2.20 * Square(end_dx - target_dx);
+    score += 0.55 * Square(end_vx - target_end_vx);
     score += 0.28 * Square(end_vz - target_end_vz);
     score += 0.0008 * accumulated_control_energy;
 
@@ -795,7 +985,9 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
   const auto planned_now = go2_jump_core::SampleJumpReference(
       task_, config_.reference_config, task_elapsed_s);
   const auto actual_sample =
-      ApplyContactOverrides(planned_now, observation, task_elapsed_s);
+      ApplyContactOverrides(planned_now, execution_phase_state_,
+                            command.contact_count, observation.body_velocity[2],
+                            task_elapsed_s);
   const auto command_sample =
       ApplyCandidateToSample(actual_sample, best_result.candidate);
   const auto nominal_q_ref = BuildPoseForSample(command_sample);
@@ -845,9 +1037,30 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildPoseForSample(
   }
 
   const double pitch_rad = sample.desired_body_pitch_deg * kPi / 180.0;
-  const double hip_delta = Clamp(0.18 * pitch_rad, -0.10, 0.10);
-  const double thigh_delta = Clamp(0.28 * pitch_rad, -0.14, 0.14);
-  const double calf_delta = Clamp(-0.40 * pitch_rad, -0.18, 0.18);
+  double phase_pitch_scale = 1.0;
+  switch (sample.phase) {
+    case go2_jump_core::JumpPhase::kCrouch:
+      phase_pitch_scale = 1.2;
+      break;
+    case go2_jump_core::JumpPhase::kPush:
+      phase_pitch_scale = 2.4;
+      break;
+    case go2_jump_core::JumpPhase::kFlight:
+      phase_pitch_scale = 1.8;
+      break;
+    case go2_jump_core::JumpPhase::kLanding:
+      phase_pitch_scale = 1.3;
+      break;
+    case go2_jump_core::JumpPhase::kSettle:
+      phase_pitch_scale = 1.0;
+      break;
+  }
+  const double hip_delta =
+      Clamp(0.18 * phase_pitch_scale * pitch_rad, -0.14, 0.14);
+  const double thigh_delta =
+      Clamp(0.28 * phase_pitch_scale * pitch_rad, -0.22, 0.22);
+  const double calf_delta =
+      Clamp(-0.40 * phase_pitch_scale * pitch_rad, -0.28, 0.28);
 
   pose[0] -= hip_delta;
   pose[3] += hip_delta;
@@ -872,6 +1085,8 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildFeedforwardForSampl
     const go2_jump_core::JumpReferenceSample& sample) const {
   std::array<double, kControlledJointCount> tau{};
   const double push_scale = Clamp(task.target_takeoff_speed_mps / 2.2, 0.0, 1.0);
+  const double forward_bias_scale =
+      Clamp(task.target_takeoff_velocity_x_mps / 1.4, 0.0, 1.4);
   const double landing_scale = Clamp(sample.landing_brace_factor, 0.0, 1.0);
 
   if (sample.phase == go2_jump_core::JumpPhase::kPush) {
@@ -879,11 +1094,29 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildFeedforwardForSampl
         Clamp(5.5 + 6.0 * push_scale, 0.0, config_.max_feedforward_torque_nm);
     const double calf_tau =
         Clamp(9.0 + 8.5 * push_scale, 0.0, config_.max_feedforward_torque_nm);
-    for (std::size_t idx : {1u, 4u, 7u, 10u}) {
-      tau[idx] = thigh_tau;
+    const double front_thigh_tau = Clamp(
+        thigh_tau - 0.8 * forward_bias_scale, 0.0,
+        config_.max_feedforward_torque_nm);
+    const double front_calf_tau = Clamp(
+        calf_tau - 1.2 * forward_bias_scale, 0.0,
+        config_.max_feedforward_torque_nm);
+    const double rear_thigh_tau = Clamp(
+        thigh_tau + 1.4 * forward_bias_scale, 0.0,
+        config_.max_feedforward_torque_nm);
+    const double rear_calf_tau = Clamp(
+        calf_tau + 2.2 * forward_bias_scale, 0.0,
+        config_.max_feedforward_torque_nm);
+    for (std::size_t idx : {1u, 4u}) {
+      tau[idx] = front_thigh_tau;
     }
-    for (std::size_t idx : {2u, 5u, 8u, 11u}) {
-      tau[idx] = calf_tau;
+    for (std::size_t idx : {2u, 5u}) {
+      tau[idx] = front_calf_tau;
+    }
+    for (std::size_t idx : {7u, 10u}) {
+      tau[idx] = rear_thigh_tau;
+    }
+    for (std::size_t idx : {8u, 11u}) {
+      tau[idx] = rear_calf_tau;
     }
   } else if (sample.phase == go2_jump_core::JumpPhase::kLanding) {
     const double thigh_tau = Clamp(-3.0 - 5.0 * landing_scale,
@@ -905,8 +1138,9 @@ double WholeBodyMpc::GainsForPhase(go2_jump_core::JumpPhase phase,
                                    bool derivative) const {
   switch (phase) {
     case go2_jump_core::JumpPhase::kCrouch:
-    case go2_jump_core::JumpPhase::kPush:
       return derivative ? config_.default_kd : config_.default_kp;
+    case go2_jump_core::JumpPhase::kPush:
+      return derivative ? config_.push_kd : config_.push_kp;
     case go2_jump_core::JumpPhase::kFlight:
       return derivative ? config_.flight_kd : config_.flight_kp;
     case go2_jump_core::JumpPhase::kLanding:
@@ -919,97 +1153,136 @@ double WholeBodyMpc::GainsForPhase(go2_jump_core::JumpPhase phase,
 
 go2_jump_core::JumpReferenceSample WholeBodyMpc::ApplyContactOverrides(
     const go2_jump_core::JumpReferenceSample& planned_sample,
-    const RobotObservation& observation, double task_elapsed_s) const {
-  return ApplyContactOverrides(planned_sample, CountContacts(observation.foot_contact),
-                               observation.contact_signal_valid,
+    const RobotObservation& observation, double task_elapsed_s) {
+  const auto phase_state =
+      BuildExecutionPhaseEventState(observation, task_elapsed_s);
+  return ApplyContactOverrides(planned_sample, phase_state,
+                               CountContacts(observation.foot_contact),
                                observation.body_velocity[2], task_elapsed_s);
 }
 
 go2_jump_core::JumpReferenceSample WholeBodyMpc::ApplyContactOverrides(
-    const go2_jump_core::JumpReferenceSample& planned_sample, int contact_count,
-    bool contact_signal_valid, double body_vertical_velocity_mps,
-    double task_elapsed_s) const {
+    const go2_jump_core::JumpReferenceSample& planned_sample,
+    const PhaseEventState& state, int contact_count,
+    double body_vertical_velocity_mps, double task_elapsed_s) const {
   auto sample = planned_sample;
-  if (!contact_signal_valid) {
+  if (!state.contact_signal_valid) {
     return sample;
   }
 
   const double push_end = task_.crouch_duration_s + task_.push_duration_s;
-  const double flight_elapsed_s = std::max(0.0, task_elapsed_s - push_end);
-  const double max_push_extension_s =
-      std::min(0.14, std::max(0.06, 0.6 * task_.push_duration_s));
-  const double max_flight_hold_s =
-      task_.estimated_flight_time_s + 0.08;
+  const double max_push_extension_s = std::max(
+      config_.late_takeoff_window_s,
+      std::min(0.34, std::max(0.18, task_.estimated_flight_time_s + 0.10)));
+  const double max_flight_hold_s = task_.estimated_flight_time_s + 0.12;
+  const double flight_duration_s = std::max(task_.estimated_flight_time_s, 1e-6);
+  const double landing_duration_s = std::max(task_.landing_duration_s, 1e-6);
+  const double settle_duration_s = std::max(task_.settle_duration_s, 1e-6);
+  const double takeoff_time_s =
+      state.takeoff_latched ? state.takeoff_time_s : state.takeoff_candidate_start_s;
+  const double touchdown_time_s = state.touchdown_latched
+                                      ? state.touchdown_time_s
+                                      : state.touchdown_candidate_start_s;
 
-  if (planned_sample.phase == go2_jump_core::JumpPhase::kFlight &&
-      contact_count > config_.flight_contact_count_max &&
-      flight_elapsed_s <= max_push_extension_s &&
-      body_vertical_velocity_mps >= -0.05) {
-    sample = go2_jump_core::SampleJumpReference(
+  const auto build_push_hold_sample = [&]() {
+    auto hold_sample = go2_jump_core::SampleJumpReference(
         task_, config_.reference_config, std::max(0.0, push_end - 1e-4));
-    sample.phase = go2_jump_core::JumpPhase::kPush;
-    sample.time_in_phase_s = task_.push_duration_s;
-    sample.desired_forward_velocity_mps =
-        std::max(sample.desired_forward_velocity_mps,
-                 task_.target_takeoff_velocity_x_mps);
-    sample.desired_vertical_velocity_mps =
-        std::max(sample.desired_vertical_velocity_mps,
-                 task_.target_takeoff_velocity_z_mps);
-    sample.desired_body_pitch_deg = task_.objective.target_takeoff_pitch_deg;
-    sample.desired_body_height_offset_m =
+    hold_sample.phase = go2_jump_core::JumpPhase::kPush;
+    hold_sample.time_in_phase_s = task_.push_duration_s;
+    hold_sample.desired_forward_velocity_mps = task_.target_takeoff_velocity_x_mps;
+    hold_sample.desired_vertical_velocity_mps = task_.target_takeoff_velocity_z_mps;
+    hold_sample.desired_body_pitch_deg = task_.objective.target_takeoff_pitch_deg;
+    hold_sample.desired_body_height_offset_m =
         config_.reference_config.push_height_offset_m;
-    return sample;
-  }
+    hold_sample.leg_retraction_ratio = 0.0;
+    hold_sample.landing_brace_factor = 0.0;
+    return hold_sample;
+  };
 
-  if (planned_sample.phase == go2_jump_core::JumpPhase::kPush &&
-      task_elapsed_s >= task_.crouch_duration_s + 0.35 * task_.push_duration_s &&
-      contact_count <= config_.flight_contact_count_max) {
-    sample.phase = go2_jump_core::JumpPhase::kFlight;
-    sample.time_in_phase_s = flight_elapsed_s;
-    sample.leg_retraction_ratio = std::max(sample.leg_retraction_ratio, 0.2);
-  }
-
-  if (planned_sample.phase == go2_jump_core::JumpPhase::kLanding &&
-      contact_count <= config_.flight_contact_count_max &&
-      flight_elapsed_s <= max_flight_hold_s) {
-    const double clamped_time = std::min(
-        task_elapsed_s,
-        push_end + std::max(task_.estimated_flight_time_s - 1e-4, 1e-4));
-    sample = go2_jump_core::SampleJumpReference(
-        task_, config_.reference_config, clamped_time);
-    sample.phase = go2_jump_core::JumpPhase::kFlight;
-    sample.time_in_phase_s = std::max(0.0, clamped_time - push_end);
-    sample.desired_vertical_velocity_mps =
+  const auto build_flight_sample = [&](double flight_elapsed_s) {
+    go2_jump_core::JumpReferenceSample flight_sample{};
+    const double alpha = Clamp(flight_elapsed_s / flight_duration_s, 0.0, 1.0);
+    const double descent_alpha = Smooth01(std::max(0.0, (alpha - 0.5) / 0.5));
+    flight_sample.phase = go2_jump_core::JumpPhase::kFlight;
+    flight_sample.time_in_phase_s = flight_elapsed_s;
+    flight_sample.desired_forward_velocity_mps = task_.target_takeoff_velocity_x_mps;
+    flight_sample.desired_vertical_velocity_mps =
         task_.target_takeoff_velocity_z_mps -
-        config_.reference_config.gravity_mps2 * sample.time_in_phase_s;
-    return sample;
+        config_.reference_config.gravity_mps2 * flight_elapsed_s;
+    flight_sample.desired_body_pitch_deg =
+        Lerp(task_.objective.target_takeoff_pitch_deg,
+             task_.objective.target_landing_pitch_deg, descent_alpha);
+    flight_sample.desired_body_height_offset_m = Lerp(
+        config_.reference_config.flight_height_offset_m,
+        config_.reference_config.landing_height_offset_m, descent_alpha);
+    flight_sample.leg_retraction_ratio = Smooth01(alpha);
+    flight_sample.landing_brace_factor = descent_alpha;
+    return flight_sample;
+  };
+
+  const auto build_landing_sample = [&](double landing_elapsed_s) {
+    go2_jump_core::JumpReferenceSample landing_sample{};
+    const double alpha = Smooth01(landing_elapsed_s / landing_duration_s);
+    landing_sample.phase = go2_jump_core::JumpPhase::kLanding;
+    landing_sample.time_in_phase_s = landing_elapsed_s;
+    landing_sample.desired_forward_velocity_mps = 0.0;
+    landing_sample.desired_vertical_velocity_mps = 0.0;
+    landing_sample.desired_body_pitch_deg =
+        Lerp(task_.objective.target_landing_pitch_deg, 0.0, alpha);
+    landing_sample.desired_body_height_offset_m =
+        Lerp(config_.reference_config.landing_height_offset_m, 0.0, alpha);
+    landing_sample.leg_retraction_ratio = 0.0;
+    landing_sample.landing_brace_factor = Lerp(1.0, 0.3, alpha);
+    return landing_sample;
+  };
+
+  const auto build_settle_sample = [&](double settle_elapsed_s) {
+    go2_jump_core::JumpReferenceSample settle_sample{};
+    const double alpha = Smooth01(settle_elapsed_s / settle_duration_s);
+    settle_sample.phase = go2_jump_core::JumpPhase::kSettle;
+    settle_sample.time_in_phase_s = settle_elapsed_s;
+    settle_sample.desired_forward_velocity_mps = 0.0;
+    settle_sample.desired_vertical_velocity_mps = 0.0;
+    settle_sample.desired_body_pitch_deg = 0.0;
+    settle_sample.desired_body_height_offset_m = 0.0;
+    settle_sample.leg_retraction_ratio = 0.0;
+    settle_sample.landing_brace_factor = Lerp(0.3, 0.0, alpha);
+    return settle_sample;
+  };
+
+  if (!state.takeoff_latched &&
+      contact_count > config_.flight_contact_count_max &&
+      task_elapsed_s <= push_end + max_push_extension_s &&
+      (planned_sample.phase == go2_jump_core::JumpPhase::kFlight ||
+       planned_sample.phase == go2_jump_core::JumpPhase::kLanding ||
+       planned_sample.phase == go2_jump_core::JumpPhase::kSettle) &&
+      body_vertical_velocity_mps >= -0.20) {
+    return build_push_hold_sample();
   }
 
-  if (planned_sample.phase == go2_jump_core::JumpPhase::kFlight &&
-      flight_elapsed_s >= config_.min_flight_time_before_touchdown_s &&
-      contact_count >= config_.touchdown_contact_count_threshold &&
-      body_vertical_velocity_mps <= 0.15) {
-    sample.phase = go2_jump_core::JumpPhase::kLanding;
-    sample.time_in_phase_s = 0.0;
-    sample.desired_vertical_velocity_mps =
-        std::min(sample.desired_vertical_velocity_mps, 0.0);
-    sample.desired_body_pitch_deg = task_.objective.target_landing_pitch_deg;
-    sample.desired_body_height_offset_m =
-        config_.reference_config.landing_height_offset_m;
-    sample.landing_brace_factor = 1.0;
+  if (takeoff_time_s >= 0.0 && !state.touchdown_latched) {
+    const double flight_elapsed_s = std::max(0.0, task_elapsed_s - takeoff_time_s);
+    if (planned_sample.phase == go2_jump_core::JumpPhase::kPush ||
+        planned_sample.phase == go2_jump_core::JumpPhase::kFlight ||
+        ((planned_sample.phase == go2_jump_core::JumpPhase::kLanding ||
+          planned_sample.phase == go2_jump_core::JumpPhase::kSettle) &&
+         flight_elapsed_s <= max_flight_hold_s)) {
+      return build_flight_sample(flight_elapsed_s);
+    }
   }
 
-  if (planned_sample.phase == go2_jump_core::JumpPhase::kLanding &&
-      contact_count == 4 &&
-      std::abs(body_vertical_velocity_mps) <=
-          config_.settle_vertical_velocity_threshold_mps &&
-      task_elapsed_s >=
-          push_end + task_.estimated_flight_time_s + 0.5 * task_.landing_duration_s) {
-    sample.phase = go2_jump_core::JumpPhase::kSettle;
-    sample.time_in_phase_s = 0.0;
-    sample.desired_body_pitch_deg = 0.0;
-    sample.desired_body_height_offset_m = 0.0;
-    sample.landing_brace_factor = 0.2;
+  if (touchdown_time_s >= 0.0 && !state.settle_latched) {
+    const double landing_elapsed_s =
+        std::max(0.0, task_elapsed_s - touchdown_time_s);
+    return build_landing_sample(landing_elapsed_s);
+  }
+
+  if (state.settle_latched) {
+    const double settle_start_time_s =
+        state.settle_time_s >= 0.0 ? state.settle_time_s : task_elapsed_s;
+    const double settle_elapsed_s =
+        std::max(0.0, task_elapsed_s - settle_start_time_s);
+    return build_settle_sample(settle_elapsed_s);
   }
 
   return sample;
