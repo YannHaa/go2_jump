@@ -116,6 +116,17 @@ Run one instrumented trial and save a report:
 The script writes `summary.json`, `stack.log`, `sim.log`, and `recorder.log`
 under `reports/trials/<timestamp>_d<distance>_mujoco_native_mpc/`.
 
+Run a small repeated batch and aggregate the result:
+
+```bash
+GO2_JUMP_BATCH_REPEATS=2 \
+GO2_JUMP_BATCH_DISTANCES="0.20 0.25 0.30 0.35" \
+./scripts/docker_run_jump_batch.sh
+```
+
+The batch helper writes a manifest and aggregated statistics under
+`reports/batches/<timestamp>/`.
+
 ## Recommended Reading Order
 
 1. Read this file for the repository entrypoints and current status.

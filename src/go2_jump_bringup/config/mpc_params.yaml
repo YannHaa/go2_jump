@@ -31,6 +31,7 @@ go2_jump_mpc_node:
     auto_start_stance_dwell_s: 0.15
     auto_start_max_planar_speed_mps: 0.20
     auto_start_max_vertical_speed_mps: 0.12
+    auto_start_max_wait_s: 4.0
     default_kp: 42.0
     default_kd: 4.5
     push_kp: 26.0

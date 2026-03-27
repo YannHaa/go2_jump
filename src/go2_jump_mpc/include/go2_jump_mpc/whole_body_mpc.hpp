@@ -83,6 +83,7 @@ struct WholeBodyMpcConfig {
   double auto_start_stance_dwell_s{0.15};
   double auto_start_max_planar_speed_mps{0.20};
   double auto_start_max_vertical_speed_mps{0.12};
+  double auto_start_max_wait_s{4.0};
 
   double default_kp{42.0};
   double default_kd{4.5};

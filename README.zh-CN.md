@@ -113,6 +113,16 @@ GO2_JUMP_ENABLE_LOWCMD_OUTPUT=true \
 脚本会在 `reports/trials/<timestamp>_d<distance>_mujoco_native_mpc/` 下生成
 `summary.json`、`stack.log`、`sim.log` 和 `recorder.log`。
 
+运行一个小规模重复批次并自动汇总结果：
+
+```bash
+GO2_JUMP_BATCH_REPEATS=2 \
+GO2_JUMP_BATCH_DISTANCES="0.20 0.25 0.30 0.35" \
+./scripts/docker_run_jump_batch.sh
+```
+
+批量脚本会在 `reports/batches/<timestamp>/` 下生成 manifest 和聚合统计结果。
+
 ## 建议阅读顺序
 
 1. 先读本文件，建立对仓库入口和当前状态的整体认识。

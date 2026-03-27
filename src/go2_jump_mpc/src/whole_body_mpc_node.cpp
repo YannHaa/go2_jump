@@ -121,6 +121,8 @@ class WholeBodyMpcNode : public rclcpp::Node {
     config_.auto_start_max_vertical_speed_mps = declare_parameter(
         "auto_start_max_vertical_speed_mps",
         config_.auto_start_max_vertical_speed_mps);
+    config_.auto_start_max_wait_s = declare_parameter(
+        "auto_start_max_wait_s", config_.auto_start_max_wait_s);
     config_.default_kp = declare_parameter("default_kp", config_.default_kp);
     config_.default_kd = declare_parameter("default_kd", config_.default_kd);
     config_.push_kp = declare_parameter("push_kp", config_.push_kp);
@@ -247,6 +249,7 @@ class WholeBodyMpcNode : public rclcpp::Node {
     if (task_changed) {
       task_started_ = false;
       stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+      task_wait_start_time_ = now();
       last_phase_name_.clear();
       have_cached_command_ = false;
       RCLCPP_INFO(
@@ -337,19 +340,31 @@ class WholeBodyMpcNode : public rclcpp::Node {
         planar_speed <= config_.auto_start_max_planar_speed_mps &&
         std::abs(observation_.body_velocity[2]) <=
             config_.auto_start_max_vertical_speed_mps;
+    const bool waited_too_long =
+        task_wait_start_time_.nanoseconds() != 0 &&
+        (now() - task_wait_start_time_).seconds() >= config_.auto_start_max_wait_s;
 
     if (!stance_ready) {
-      stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
-      return;
+      if (waited_too_long) {
+        RCLCPP_WARN(
+            get_logger(),
+            "Auto-start fallback after %.2f s: contacts=%d planar_speed=%.3f vertical_speed=%.3f",
+            (now() - task_wait_start_time_).seconds(), contact_count, planar_speed,
+            observation_.body_velocity[2]);
+      } else {
+        stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+        return;
+      }
     }
 
-    if (stance_ready_since_.nanoseconds() == 0) {
+    if (stance_ready && stance_ready_since_.nanoseconds() == 0) {
       stance_ready_since_ = now();
       return;
     }
 
-    if ((now() - stance_ready_since_).seconds() <
-        config_.auto_start_stance_dwell_s) {
+    if (stance_ready &&
+        (now() - stance_ready_since_).seconds() <
+            config_.auto_start_stance_dwell_s) {
       return;
     }
 
@@ -432,6 +447,7 @@ class WholeBodyMpcNode : public rclcpp::Node {
   rclcpp::Time task_start_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_solve_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time stance_ready_since_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time task_wait_start_time_{0, 0, RCL_ROS_TIME};
   unitree_go::msg::LowCmd low_cmd_template_{};
   std::unique_ptr<go2_jump_mpc::WholeBodyMpc> controller_;
 
