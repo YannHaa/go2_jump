@@ -110,6 +110,9 @@ class WholeBodyMpcNode : public rclcpp::Node {
     config_.native_backend_update_interval_s = declare_parameter(
         "native_backend_update_interval_s",
         config_.native_backend_update_interval_s);
+    config_.native_backend_dynamic_update_interval_s = declare_parameter(
+        "native_backend_dynamic_update_interval_s",
+        config_.native_backend_dynamic_update_interval_s);
     config_.auto_start_require_full_contact = declare_parameter(
         "auto_start_require_full_contact",
         config_.auto_start_require_full_contact);
@@ -159,6 +162,12 @@ class WholeBodyMpcNode : public rclcpp::Node {
         "takeoff_latch_dwell_s", config_.takeoff_latch_dwell_s);
     config_.touchdown_latch_dwell_s = declare_parameter(
         "touchdown_latch_dwell_s", config_.touchdown_latch_dwell_s);
+    config_.strong_takeoff_vertical_velocity_mps = declare_parameter(
+        "strong_takeoff_vertical_velocity_mps",
+        config_.strong_takeoff_vertical_velocity_mps);
+    config_.strong_touchdown_vertical_velocity_mps = declare_parameter(
+        "strong_touchdown_vertical_velocity_mps",
+        config_.strong_touchdown_vertical_velocity_mps);
     config_.settle_latch_dwell_s = declare_parameter(
         "settle_latch_dwell_s", config_.settle_latch_dwell_s);
     config_.settle_vertical_velocity_threshold_mps = declare_parameter(
@@ -358,9 +367,18 @@ class WholeBodyMpcNode : public rclcpp::Node {
     const bool waited_too_long =
         task_wait_start_time_.nanoseconds() != 0 &&
         (now() - task_wait_start_time_).seconds() >= config_.auto_start_max_wait_s;
+    const bool relaxed_stance_ready =
+        contact_count >= 2 &&
+        planar_speed <= config_.auto_start_max_planar_speed_mps &&
+        std::abs(observation_.body_velocity[2]) <=
+            config_.auto_start_max_vertical_speed_mps;
 
     if (!stance_ready) {
       if (waited_too_long) {
+        if (!relaxed_stance_ready) {
+          stance_ready_since_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+          return;
+        }
         RCLCPP_WARN(
             get_logger(),
             "Auto-start fallback after %.2f s: contacts=%d planar_speed=%.3f vertical_speed=%.3f",
@@ -388,9 +406,32 @@ class WholeBodyMpcNode : public rclcpp::Node {
     RCLCPP_INFO(get_logger(), "Starting MPC task execution.");
   }
 
+  void PublishPoseHold(
+      const std::array<double, go2_jump_mpc::kControlledJointCount>& pose,
+      double kp, double kd) {
+    if (!config_.enable_lowcmd_output || !observation_.lowstate_received) {
+      return;
+    }
+
+    auto low_cmd = low_cmd_template_;
+    for (std::size_t i = 0; i < go2_jump_mpc::kControlledJointCount; ++i) {
+      low_cmd.motor_cmd[i].mode = 0x01;
+      low_cmd.motor_cmd[i].q = pose[i];
+      low_cmd.motor_cmd[i].dq = 0.0;
+      low_cmd.motor_cmd[i].kp = kp;
+      low_cmd.motor_cmd[i].kd = kd;
+      low_cmd.motor_cmd[i].tau = 0.0;
+    }
+    go2_jump_mpc::FillLowCmdCrc(low_cmd);
+    low_cmd_pub_->publish(low_cmd);
+  }
+
   void ControlTick() {
     StartTaskIfNeeded();
     if (!task_started_ || !controller_->HasTask()) {
+      if (have_task_) {
+        PublishPoseHold(observation_.q, config_.default_kp, config_.default_kd);
+      }
       return;
     }
     if (!observation_.lowstate_received) {
@@ -398,10 +439,25 @@ class WholeBodyMpcNode : public rclcpp::Node {
     }
 
     const double task_elapsed_s = (now() - task_start_time_).seconds();
+    double native_refresh_interval_s = config_.native_backend_update_interval_s;
+    if (IsNativeBackend(config_.solver_backend)) {
+      const double dynamic_window_start_s =
+          std::max(0.0, active_task_.crouch_duration_s - 0.08);
+      const double dynamic_window_end_s =
+          active_task_.crouch_duration_s + active_task_.push_duration_s +
+          active_task_.estimated_flight_time_s + active_task_.landing_duration_s +
+          0.08;
+      if (task_elapsed_s >= dynamic_window_start_s &&
+          task_elapsed_s <= dynamic_window_end_s) {
+        native_refresh_interval_s = std::min(
+            native_refresh_interval_s,
+            config_.native_backend_dynamic_update_interval_s);
+      }
+    }
     const bool should_refresh_command =
         !have_cached_command_ || !IsNativeBackend(config_.solver_backend) ||
         (now() - last_solve_time_).seconds() >=
-            config_.native_backend_update_interval_s;
+            native_refresh_interval_s;
     if (should_refresh_command) {
       cached_command_ = controller_->Solve(observation_, task_elapsed_s);
       if (!cached_command_.valid) {

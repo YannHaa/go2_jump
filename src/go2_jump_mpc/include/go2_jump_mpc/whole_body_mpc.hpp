@@ -79,6 +79,7 @@ struct WholeBodyMpcConfig {
   bool auto_start{true};
   std::string solver_backend{"reference_preview"};
   double native_backend_update_interval_s{0.03};
+  double native_backend_dynamic_update_interval_s{0.01};
   bool auto_start_require_full_contact{true};
   double auto_start_stance_dwell_s{0.15};
   double auto_start_max_planar_speed_mps{0.20};
@@ -107,6 +108,8 @@ struct WholeBodyMpcConfig {
   double min_flight_time_before_touchdown_s{0.03};
   double takeoff_latch_dwell_s{0.02};
   double touchdown_latch_dwell_s{0.02};
+  double strong_takeoff_vertical_velocity_mps{0.18};
+  double strong_touchdown_vertical_velocity_mps{-0.10};
   double settle_latch_dwell_s{0.04};
   double settle_vertical_velocity_threshold_mps{0.20};
   std::string mujoco_model_path{};

@@ -670,16 +670,23 @@ void WholeBodyMpc::UpdatePhaseEventState(PhaseEventState& state, int contact_cou
 
   const double takeoff_gate_time_s =
       task_.crouch_duration_s + 0.30 * task_.push_duration_s;
+  const double strong_takeoff_gate_time_s =
+      task_.crouch_duration_s + 0.55 * task_.push_duration_s;
   const bool takeoff_candidate =
       task_elapsed_s >= takeoff_gate_time_s &&
       contact_count <= config_.flight_contact_count_max;
+  const bool strong_takeoff_candidate =
+      task_elapsed_s >= strong_takeoff_gate_time_s &&
+      contact_count == 0 &&
+      body_vertical_velocity_mps >= config_.strong_takeoff_vertical_velocity_mps;
   if (!state.takeoff_latched) {
     if (takeoff_candidate) {
       if (state.takeoff_candidate_start_s < 0.0) {
         state.takeoff_candidate_start_s = task_elapsed_s;
       }
       if (task_elapsed_s - state.takeoff_candidate_start_s >=
-          config_.takeoff_latch_dwell_s) {
+              config_.takeoff_latch_dwell_s ||
+          strong_takeoff_candidate) {
         state.takeoff_latched = true;
         state.takeoff_time_s = state.takeoff_candidate_start_s;
       }
@@ -697,12 +704,18 @@ void WholeBodyMpc::UpdatePhaseEventState(PhaseEventState& state, int contact_cou
         flight_elapsed_s >= config_.min_flight_time_before_touchdown_s &&
         contact_count >= config_.touchdown_contact_count_threshold &&
         (body_vertical_velocity_mps <= 0.35 || contact_count == 4);
+    const bool strong_touchdown_candidate =
+        flight_elapsed_s >= 0.5 * config_.min_flight_time_before_touchdown_s &&
+        contact_count >= config_.touchdown_contact_count_threshold &&
+        body_vertical_velocity_mps <=
+            config_.strong_touchdown_vertical_velocity_mps;
     if (touchdown_candidate) {
       if (state.touchdown_candidate_start_s < 0.0) {
         state.touchdown_candidate_start_s = task_elapsed_s;
       }
       if (task_elapsed_s - state.touchdown_candidate_start_s >=
-          config_.touchdown_latch_dwell_s) {
+              config_.touchdown_latch_dwell_s ||
+          strong_touchdown_candidate) {
         state.touchdown_latched = true;
         state.touchdown_time_s = state.touchdown_candidate_start_s;
       }
@@ -1046,16 +1059,20 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
                                             std::max(0.0, horizon_end_time - push_end))
                                      : end_reference.desired_vertical_velocity_mps;
     if (takeoff_recorded) {
-      const double min_takeoff_vx = 0.46 + 0.08 * distance_alpha;
+      const double preferred_takeoff_pitch_deg =
+          Lerp(-8.5, -10.5, std::min(distance_alpha, 1.0));
+      const double min_takeoff_vx = std::max(
+          0.48 + 0.14 * distance_alpha,
+          0.34 * reference_profile.flight_forward_velocity_mps);
       const double min_takeoff_vz =
           0.78 + 0.10 * (1.0 - std::min(distance_alpha, 1.0));
-      score += 1.30 * horizontal_priority *
+      score += 1.55 * horizontal_priority *
                Square(takeoff_vx - reference_profile.flight_forward_velocity_mps);
       score += 0.75 * vertical_priority *
                Square(takeoff_vz - reference_profile.push_vertical_velocity_mps);
-      score += 0.04 *
-               Square(takeoff_pitch_deg - reference_profile.effective_takeoff_pitch_deg);
-      score += 2.20 * horizontal_priority *
+      score += 0.22 *
+               Square(std::max(0.0, takeoff_pitch_deg - preferred_takeoff_pitch_deg));
+      score += 2.60 * horizontal_priority *
                Square(std::max(0.0, min_takeoff_vx - takeoff_vx));
       score += 1.80 * vertical_priority *
                Square(std::max(0.0, min_takeoff_vz - takeoff_vz));
