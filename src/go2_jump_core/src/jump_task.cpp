@@ -23,6 +23,10 @@ double Lerp(double a, double b, double alpha) {
   return a + (b - a) * alpha;
 }
 
+double DistanceDemandAlpha(const JumpTaskSpec& task) {
+  return Clamp((task.objective.target_distance_m - 0.18) / 0.18, 0.0, 1.2);
+}
+
 std::string MakeTaskId(const JumpObjective& objective) {
   std::ostringstream stream;
   stream.setf(std::ios::fixed);
@@ -110,10 +114,34 @@ JumpTaskSpec BuildJumpTaskSpec(const JumpObjective& objective,
   return task;
 }
 
+JumpReferenceProfile BuildJumpReferenceProfile(const JumpTaskSpec& task,
+                                               const JumpTaskConfig& config) {
+  JumpReferenceProfile profile{};
+  const double demand_alpha = DistanceDemandAlpha(task);
+
+  profile.effective_takeoff_pitch_deg = Clamp(
+      task.objective.target_takeoff_pitch_deg + 2.5 * demand_alpha, -8.0, 4.0);
+  profile.push_forward_velocity_mps =
+      task.target_takeoff_velocity_x_mps * (1.0 + 0.03 * demand_alpha);
+  profile.push_vertical_velocity_mps =
+      task.target_takeoff_velocity_z_mps * (1.0 - 0.05 * demand_alpha);
+  profile.flight_forward_velocity_mps =
+      task.target_takeoff_velocity_x_mps * (1.0 + 0.02 * demand_alpha);
+  profile.crouch_height_offset_m = config.crouch_height_offset_m - 0.008 * demand_alpha;
+  profile.push_height_offset_m = config.push_height_offset_m - 0.006 * demand_alpha;
+  profile.flight_height_offset_m = config.flight_height_offset_m - 0.006 * demand_alpha;
+  profile.landing_height_offset_m =
+      config.landing_height_offset_m - 0.003 * demand_alpha;
+  profile.leg_retraction_scale = Clamp(1.0 - 0.08 * demand_alpha, 0.85, 1.0);
+  profile.landing_brace_scale = 1.0 + 0.05 * demand_alpha;
+  return profile;
+}
+
 JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
                                         const JumpTaskConfig& config,
                                         double elapsed_s) {
   JumpReferenceSample sample{};
+  const auto profile = BuildJumpReferenceProfile(task, config);
   const double t = std::max(0.0, elapsed_s);
   const double crouch_end = task.crouch_duration_s;
   const double push_end = crouch_end + task.push_duration_s;
@@ -125,9 +153,9 @@ JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
     sample.phase = JumpPhase::kCrouch;
     sample.time_in_phase_s = t;
     sample.desired_body_pitch_deg =
-        Lerp(0.0, 0.6 * task.objective.target_takeoff_pitch_deg, alpha);
+        Lerp(0.0, 0.6 * profile.effective_takeoff_pitch_deg, alpha);
     sample.desired_body_height_offset_m =
-        Lerp(0.0, config.crouch_height_offset_m, alpha);
+        Lerp(0.0, profile.crouch_height_offset_m, alpha);
     return sample;
   }
 
@@ -137,14 +165,14 @@ JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
     sample.phase = JumpPhase::kPush;
     sample.time_in_phase_s = t - crouch_end;
     sample.desired_forward_velocity_mps =
-        Lerp(0.0, task.target_takeoff_velocity_x_mps, alpha);
+        Lerp(0.0, profile.push_forward_velocity_mps, alpha);
     sample.desired_vertical_velocity_mps =
-        Lerp(0.0, task.target_takeoff_velocity_z_mps, alpha);
+        Lerp(0.0, profile.push_vertical_velocity_mps, alpha);
     sample.desired_body_pitch_deg =
-        Lerp(0.6 * task.objective.target_takeoff_pitch_deg,
-             task.objective.target_takeoff_pitch_deg, alpha);
+        Lerp(0.6 * profile.effective_takeoff_pitch_deg,
+             profile.effective_takeoff_pitch_deg, alpha);
     sample.desired_body_height_offset_m =
-        Lerp(config.crouch_height_offset_m, config.push_height_offset_m, alpha);
+        Lerp(profile.crouch_height_offset_m, profile.push_height_offset_m, alpha);
     return sample;
   }
 
@@ -154,18 +182,19 @@ JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
     const double descent_alpha = Smooth01(std::max(0.0, (alpha - 0.5) / 0.5));
     sample.phase = JumpPhase::kFlight;
     sample.time_in_phase_s = t - push_end;
-    sample.desired_forward_velocity_mps = task.target_takeoff_velocity_x_mps;
+    sample.desired_forward_velocity_mps = profile.flight_forward_velocity_mps;
     sample.desired_vertical_velocity_mps =
-        task.target_takeoff_velocity_z_mps -
+        profile.push_vertical_velocity_mps -
         9.81 * (t - push_end);
     sample.desired_body_pitch_deg =
-        Lerp(task.objective.target_takeoff_pitch_deg,
+        Lerp(profile.effective_takeoff_pitch_deg,
              task.objective.target_landing_pitch_deg, descent_alpha);
     sample.desired_body_height_offset_m = Lerp(
-        config.flight_height_offset_m, config.landing_height_offset_m,
+        profile.flight_height_offset_m, profile.landing_height_offset_m,
         descent_alpha);
-    sample.leg_retraction_ratio = Smooth01(alpha);
-    sample.landing_brace_factor = descent_alpha;
+    sample.leg_retraction_ratio = Smooth01(alpha) * profile.leg_retraction_scale;
+    sample.landing_brace_factor =
+        Clamp(descent_alpha * profile.landing_brace_scale, 0.0, 1.2);
     return sample;
   }
 
@@ -177,8 +206,9 @@ JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
     sample.desired_body_pitch_deg =
         Lerp(task.objective.target_landing_pitch_deg, 0.0, alpha);
     sample.desired_body_height_offset_m =
-        Lerp(config.landing_height_offset_m, 0.0, alpha);
-    sample.landing_brace_factor = Lerp(1.0, 0.3, alpha);
+        Lerp(profile.landing_height_offset_m, 0.0, alpha);
+    sample.landing_brace_factor = Lerp(
+        Clamp(profile.landing_brace_scale, 0.8, 1.2), 0.3, alpha);
     return sample;
   }
 

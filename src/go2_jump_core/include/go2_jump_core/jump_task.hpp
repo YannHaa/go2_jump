@@ -69,8 +69,24 @@ struct JumpReferenceSample {
   double landing_brace_factor{0.0};
 };
 
+struct JumpReferenceProfile {
+  double effective_takeoff_pitch_deg{0.0};
+  double push_forward_velocity_mps{0.0};
+  double push_vertical_velocity_mps{0.0};
+  double flight_forward_velocity_mps{0.0};
+  double crouch_height_offset_m{0.0};
+  double push_height_offset_m{0.0};
+  double flight_height_offset_m{0.0};
+  double landing_height_offset_m{0.0};
+  double leg_retraction_scale{1.0};
+  double landing_brace_scale{1.0};
+};
+
 JumpTaskSpec BuildJumpTaskSpec(const JumpObjective& objective,
                                const JumpTaskConfig& config);
+
+JumpReferenceProfile BuildJumpReferenceProfile(const JumpTaskSpec& task,
+                                               const JumpTaskConfig& config);
 
 JumpReferenceSample SampleJumpReference(const JumpTaskSpec& task,
                                         const JumpTaskConfig& config,
