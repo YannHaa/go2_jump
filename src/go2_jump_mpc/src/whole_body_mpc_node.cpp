@@ -197,13 +197,14 @@ class WholeBodyMpcNode : public rclcpp::Node {
         [this](const go2_jump_msgs::msg::JumpTask::SharedPtr msg) {
           OnTask(*msg);
         });
+    const auto sensor_qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
     low_state_sub_ = create_subscription<unitree_go::msg::LowState>(
-        "/lowstate", 50,
+        "/lowstate", sensor_qos,
         [this](const unitree_go::msg::LowState::SharedPtr msg) {
           OnLowState(*msg);
         });
     sport_state_sub_ = create_subscription<unitree_go::msg::SportModeState>(
-        "/sportmodestate", 50,
+        "/sportmodestate", sensor_qos,
         [this](const unitree_go::msg::SportModeState::SharedPtr msg) {
           OnSportState(*msg);
         });
@@ -286,21 +287,35 @@ class WholeBodyMpcNode : public rclcpp::Node {
         have_contact_proxy_signal = true;
       }
 
-      const bool candidate_contact = observation_.foot_contact[i]
-                                         ? filtered_contact_force_[i] >=
-                                               release_threshold
-                                         : filtered_contact_force_[i] >=
-                                               config_.contact_force_threshold_n;
-      if (candidate_contact == observation_.foot_contact[i]) {
-        pending_contact_state_[i] = candidate_contact;
+      const bool currently_in_contact = observation_.foot_contact[i];
+      if (currently_in_contact) {
+        // Keep touch-down debouncing conservative, but release contact promptly once
+        // both the raw and filtered MuJoCo contact proxies drop below the release band.
+        const bool keep_contact =
+            raw_force >= release_threshold ||
+            filtered_contact_force_[i] >= release_threshold;
+        if (!keep_contact) {
+          observation_.foot_contact[i] = false;
+        }
+        pending_contact_state_[i] = false;
         pending_contact_ticks_[i] = 0;
-      } else if (candidate_contact != pending_contact_state_[i]) {
-        pending_contact_state_[i] = candidate_contact;
+        continue;
+      }
+
+      const bool candidate_contact =
+          raw_force >= config_.contact_force_threshold_n ||
+          filtered_contact_force_[i] >= config_.contact_force_threshold_n;
+      if (!candidate_contact) {
+        pending_contact_state_[i] = false;
+        pending_contact_ticks_[i] = 0;
+      } else if (!pending_contact_state_[i]) {
+        pending_contact_state_[i] = true;
         pending_contact_ticks_[i] = 1;
       } else {
         ++pending_contact_ticks_[i];
         if (pending_contact_ticks_[i] >= stable_cycles) {
-          observation_.foot_contact[i] = candidate_contact;
+          observation_.foot_contact[i] = true;
+          pending_contact_state_[i] = false;
           pending_contact_ticks_[i] = 0;
         }
       }

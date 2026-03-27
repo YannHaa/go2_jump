@@ -190,6 +190,8 @@ std::vector<CandidateAction> CandidateActionsForPhase(
     candidates.push_back({1.6, 0.1, 0.0, 0.0, 1.5, 0.2, 1.4});
     candidates.push_back({0.8, 0.0, 0.0, 0.0, 0.4, 1.0, 0.6});
     candidates.push_back({1.0, -0.2, 0.0, 0.0, 0.9, 0.0, 1.2});
+    candidates.push_back({1.1, 0.2, 0.0, 0.0, 1.0, -0.3, 1.0});
+    candidates.push_back({1.3, 0.1, 0.0, 0.0, 1.2, -0.5, 1.3});
   }
 
   return candidates;
@@ -202,19 +204,19 @@ go2_jump_core::JumpReferenceSample ApplyCandidateToSample(
         2.0 * action.pitch_adjust_scale - 1.0 * action.rear_drive_bias_scale;
   } else if (sample.phase == go2_jump_core::JumpPhase::kPush) {
     sample.desired_body_pitch_deg += 5.5 * action.pitch_adjust_scale -
-                                     1.4 * action.forward_drive_scale -
-                                     0.4 * action.rear_drive_bias_scale;
+                                     0.8 * action.forward_drive_scale -
+                                     0.2 * action.rear_drive_bias_scale;
     sample.desired_forward_velocity_mps *=
         1.0 + 0.10 * action.push_extension_scale +
         0.08 * action.pitch_adjust_scale +
         0.20 * action.forward_drive_scale +
-        0.06 * action.rear_drive_bias_scale;
+        0.08 * action.rear_drive_bias_scale;
     sample.desired_vertical_velocity_mps *=
         1.0 + 0.11 * action.push_extension_scale -
         0.03 * std::abs(action.pitch_adjust_scale) +
         0.12 * action.lift_drive_scale +
-        0.03 * action.rear_drive_bias_scale -
-        0.05 * action.forward_drive_scale;
+        0.01 * action.rear_drive_bias_scale -
+        0.08 * action.forward_drive_scale;
   } else if (sample.phase == go2_jump_core::JumpPhase::kFlight) {
     sample.desired_body_pitch_deg += 2.2 * action.pitch_adjust_scale;
     sample.leg_retraction_ratio = Clamp(
@@ -273,17 +275,17 @@ JointArray ApplyCandidateToPose(const JointArray& nominal_pose,
     }
     const double front_thigh_bias =
         (0.08 * action.pitch_adjust_scale +
-         0.06 * action.forward_drive_scale) * forward_scale;
+         0.03 * action.forward_drive_scale) * forward_scale;
     const double front_calf_bias =
         (-0.12 * action.pitch_adjust_scale -
-         0.10 * action.forward_drive_scale) * forward_scale;
+         0.06 * action.forward_drive_scale) * forward_scale;
     const double rear_thigh_bias =
         (-0.12 * action.pitch_adjust_scale -
-         0.12 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
+         0.08 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
         forward_scale;
     const double rear_calf_bias =
         (0.20 * action.pitch_adjust_scale +
-         0.22 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
+         0.14 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
         forward_scale;
     for (std::size_t thigh_idx : {1u, 4u}) {
       apply_leg_delta(thigh_idx, thigh_idx + 1, front_thigh_bias, front_calf_bias);
@@ -352,20 +354,20 @@ JointArray ApplyCandidateToFeedforward(const JointArray& nominal_tau,
     }
     const double front_thigh_bias =
         Clamp((-1.2 * action.pitch_adjust_scale -
-               1.4 * action.forward_drive_scale) * forward_scale,
+               0.9 * action.forward_drive_scale) * forward_scale,
               -max_feedforward_torque_nm, max_feedforward_torque_nm);
     const double front_calf_bias =
         Clamp((-2.0 * action.pitch_adjust_scale -
-               2.0 * action.forward_drive_scale) * forward_scale,
+               1.3 * action.forward_drive_scale) * forward_scale,
               -max_feedforward_torque_nm, max_feedforward_torque_nm);
     const double rear_thigh_bias =
         Clamp((2.2 * action.pitch_adjust_scale +
-               2.8 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
+               1.8 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
                   forward_scale,
               -max_feedforward_torque_nm, max_feedforward_torque_nm);
     const double rear_calf_bias =
         Clamp((3.4 * action.pitch_adjust_scale +
-               3.8 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
+               2.6 * (action.forward_drive_scale + action.rear_drive_bias_scale)) *
                   forward_scale,
               -max_feedforward_torque_nm, max_feedforward_torque_nm);
     for (std::size_t idx : {1u, 4u}) {
@@ -1044,12 +1046,21 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
                                             std::max(0.0, horizon_end_time - push_end))
                                      : end_reference.desired_vertical_velocity_mps;
     if (takeoff_recorded) {
+      const double min_takeoff_vx = 0.46 + 0.08 * distance_alpha;
+      const double min_takeoff_vz =
+          0.78 + 0.10 * (1.0 - std::min(distance_alpha, 1.0));
       score += 1.30 * horizontal_priority *
                Square(takeoff_vx - reference_profile.flight_forward_velocity_mps);
       score += 0.75 * vertical_priority *
                Square(takeoff_vz - reference_profile.push_vertical_velocity_mps);
       score += 0.04 *
                Square(takeoff_pitch_deg - reference_profile.effective_takeoff_pitch_deg);
+      score += 2.20 * horizontal_priority *
+               Square(std::max(0.0, min_takeoff_vx - takeoff_vx));
+      score += 1.80 * vertical_priority *
+               Square(std::max(0.0, min_takeoff_vz - takeoff_vz));
+      score += 0.18 *
+               Square(std::max(0.0, -(takeoff_pitch_deg + 12.0)));
       score += 2.80 *
                Square(predicted_ballistic_distance_m - task_.objective.target_distance_m);
       score += 2.00 * horizontal_priority * Square(std::max(
@@ -1116,6 +1127,7 @@ WholeBodyMpcCommand WholeBodyMpc::SolveMujocoSampling(
 std::array<double, kControlledJointCount> WholeBodyMpc::BuildPoseForSample(
     const go2_jump_core::JumpReferenceSample& sample) const {
   std::array<double, kControlledJointCount> pose = config_.stand_pose;
+  const double distance_alpha = JumpDistanceAlpha(task_);
   switch (sample.phase) {
     case go2_jump_core::JumpPhase::kCrouch:
       pose = BlendPose(config_.stand_pose, config_.crouch_pose, 0.9);
@@ -1142,7 +1154,7 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildPoseForSample(
       phase_pitch_scale = 1.2;
       break;
     case go2_jump_core::JumpPhase::kPush:
-      phase_pitch_scale = 2.4;
+      phase_pitch_scale = 2.0;
       break;
     case go2_jump_core::JumpPhase::kFlight:
       phase_pitch_scale = 1.8;
@@ -1183,7 +1195,56 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildPoseForSample(
     pose[calf_idx] += calf_delta_value;
   };
 
-  if (sample.phase == go2_jump_core::JumpPhase::kFlight) {
+  if (sample.phase == go2_jump_core::JumpPhase::kCrouch) {
+    const double front_preload = 0.35 * distance_alpha;
+    const double rear_preload = 0.45 * distance_alpha;
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, -0.020 * front_preload,
+                      0.030 * front_preload);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, 0.035 * rear_preload,
+                      -0.055 * rear_preload);
+    }
+  } else if (sample.phase == go2_jump_core::JumpPhase::kPush) {
+    const double drive_alpha = 0.50 * distance_alpha;
+    const double push_progress = Clamp(
+        sample.time_in_phase_s / std::max(task_.push_duration_s, 1e-6), 0.0, 1.0);
+    const double late_push_alpha =
+        Smooth01(Clamp((push_progress - 0.50) / 0.35, 0.0, 1.0));
+    const double release_alpha =
+        Smooth01(Clamp((push_progress - 0.78) / 0.18, 0.0, 1.0));
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, 0.018 * drive_alpha,
+                      -0.028 * drive_alpha);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, -0.050 * drive_alpha,
+                      0.080 * drive_alpha);
+    }
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1,
+                      0.020 * late_push_alpha * distance_alpha,
+                      -0.032 * late_push_alpha * distance_alpha);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1,
+                      -0.032 * late_push_alpha * distance_alpha,
+                      0.050 * late_push_alpha * distance_alpha);
+    }
+    const double front_release_scale =
+        release_alpha * (0.45 + 0.35 * distance_alpha);
+    const double rear_release_scale =
+        release_alpha * (0.65 + 0.55 * distance_alpha);
+    for (std::size_t thigh_idx : {1u, 4u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, 0.024 * front_release_scale,
+                      -0.040 * front_release_scale);
+    }
+    for (std::size_t thigh_idx : {7u, 10u}) {
+      apply_leg_delta(thigh_idx, thigh_idx + 1, 0.052 * rear_release_scale,
+                      -0.086 * rear_release_scale);
+    }
+  } else if (sample.phase == go2_jump_core::JumpPhase::kFlight) {
     const double tuck = Clamp(sample.leg_retraction_ratio, 0.0, 1.0);
     for (std::size_t thigh_idx : {1u, 4u}) {
       apply_leg_delta(thigh_idx, thigh_idx + 1, 0.06 * tuck, -0.10 * tuck);
@@ -1210,23 +1271,29 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildFeedforwardForSampl
   const double landing_scale = Clamp(sample.landing_brace_factor, 0.0, 1.0);
 
   if (sample.phase == go2_jump_core::JumpPhase::kPush) {
+    const double push_progress = Clamp(
+        sample.time_in_phase_s / std::max(task.push_duration_s, 1e-6), 0.0, 1.0);
+    const double late_push_alpha =
+        Smooth01(Clamp((push_progress - 0.50) / 0.35, 0.0, 1.0));
+    const double release_alpha =
+        Smooth01(Clamp((push_progress - 0.78) / 0.18, 0.0, 1.0));
     const double thigh_tau =
-        Clamp(5.4 + 5.9 * push_scale + 0.4 * distance_alpha, 0.0,
+        Clamp(5.0 + 5.3 * push_scale + 0.3 * distance_alpha, 0.0,
               config_.max_feedforward_torque_nm);
     const double calf_tau =
-        Clamp(8.8 + 8.3 * push_scale + 0.7 * distance_alpha, 0.0,
+        Clamp(7.9 + 7.5 * push_scale + 0.5 * distance_alpha, 0.0,
               config_.max_feedforward_torque_nm);
     const double front_thigh_tau = Clamp(
-        thigh_tau - (0.8 + 0.3 * distance_alpha) * forward_bias_scale, 0.0,
+        thigh_tau - (1.0 + 0.5 * distance_alpha) * forward_bias_scale, 0.0,
         config_.max_feedforward_torque_nm);
     const double front_calf_tau = Clamp(
-        calf_tau - (1.2 + 0.4 * distance_alpha) * forward_bias_scale, 0.0,
+        calf_tau - (1.6 + 0.7 * distance_alpha) * forward_bias_scale, 0.0,
         config_.max_feedforward_torque_nm);
     const double rear_thigh_tau = Clamp(
-        thigh_tau + (1.4 + 0.5 * distance_alpha) * forward_bias_scale, 0.0,
+        thigh_tau + (1.8 + 0.8 * distance_alpha) * forward_bias_scale, 0.0,
         config_.max_feedforward_torque_nm);
     const double rear_calf_tau = Clamp(
-        calf_tau + (2.2 + 0.7 * distance_alpha) * forward_bias_scale, 0.0,
+        calf_tau + (3.0 + 1.1 * distance_alpha) * forward_bias_scale, 0.0,
         config_.max_feedforward_torque_nm);
     for (std::size_t idx : {1u, 4u}) {
       tau[idx] = front_thigh_tau;
@@ -1239,6 +1306,47 @@ std::array<double, kControlledJointCount> WholeBodyMpc::BuildFeedforwardForSampl
     }
     for (std::size_t idx : {8u, 11u}) {
       tau[idx] = rear_calf_tau;
+    }
+
+    const double front_taper_thigh =
+        Clamp(-0.8 * late_push_alpha * distance_alpha, -config_.max_feedforward_torque_nm,
+              config_.max_feedforward_torque_nm);
+    const double front_taper_calf =
+        Clamp(-1.2 * late_push_alpha * distance_alpha, -config_.max_feedforward_torque_nm,
+              config_.max_feedforward_torque_nm);
+    const double rear_boost_thigh =
+        Clamp(1.0 * late_push_alpha * distance_alpha, -config_.max_feedforward_torque_nm,
+              config_.max_feedforward_torque_nm);
+    const double rear_boost_calf =
+        Clamp(1.6 * late_push_alpha * distance_alpha, -config_.max_feedforward_torque_nm,
+              config_.max_feedforward_torque_nm);
+    const double front_release_taper_thigh =
+        Clamp(-0.5 * release_alpha * (0.4 + 0.4 * distance_alpha),
+              -config_.max_feedforward_torque_nm, config_.max_feedforward_torque_nm);
+    const double front_release_taper_calf =
+        Clamp(-0.8 * release_alpha * (0.4 + 0.4 * distance_alpha),
+              -config_.max_feedforward_torque_nm, config_.max_feedforward_torque_nm);
+    const double rear_release_taper_thigh =
+        Clamp(-1.4 * release_alpha * (0.6 + 0.6 * distance_alpha),
+              -config_.max_feedforward_torque_nm, config_.max_feedforward_torque_nm);
+    const double rear_release_taper_calf =
+        Clamp(-2.2 * release_alpha * (0.6 + 0.7 * distance_alpha),
+              -config_.max_feedforward_torque_nm, config_.max_feedforward_torque_nm);
+    for (std::size_t idx : {1u, 4u}) {
+      tau[idx] = Clamp(tau[idx] + front_taper_thigh + front_release_taper_thigh, 0.0,
+                       config_.max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {2u, 5u}) {
+      tau[idx] = Clamp(tau[idx] + front_taper_calf + front_release_taper_calf, 0.0,
+                       config_.max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {7u, 10u}) {
+      tau[idx] = Clamp(tau[idx] + rear_boost_thigh + rear_release_taper_thigh, 0.0,
+                       config_.max_feedforward_torque_nm);
+    }
+    for (std::size_t idx : {8u, 11u}) {
+      tau[idx] = Clamp(tau[idx] + rear_boost_calf + rear_release_taper_calf, 0.0,
+                       config_.max_feedforward_torque_nm);
     }
   } else if (sample.phase == go2_jump_core::JumpPhase::kLanding) {
     const double thigh_tau = Clamp(-3.0 - 5.0 * landing_scale,

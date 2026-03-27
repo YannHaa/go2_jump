@@ -336,6 +336,8 @@ class TrialRecorder(Node):
                 "body_pitch_deg": msg.body_pitch_deg,
                 "forward_velocity_mps": msg.forward_velocity_mps,
                 "vertical_velocity_mps": msg.vertical_velocity_mps,
+                "foot_force_est": [float(value) for value in msg.foot_force_est],
+                "foot_contact": [bool(value) for value in msg.foot_contact],
             }
         )
 
